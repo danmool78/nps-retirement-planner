@@ -173,6 +173,7 @@ class GovPolicy:
 
     inflation_indexed: bool = True
     survivor_pension_rate: float = 0.60
+    survivor_dup_rate: float = 0.30
 
 
 # ---------------------------------------------------------------------------
