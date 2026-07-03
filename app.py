@@ -161,7 +161,8 @@ def compute_pipeline(user: UserInput, cfg: Config) -> dict:
 # ---------------------------------------------------------------------------
 def build_inputs():
     """사이드바 위젯을 그려 UserInput 과 Config 를 반환."""
-    st.sidebar.header("👫 부부 기본정보")
+    st.sidebar.markdown("### 부부 정보")
+    st.sidebar.caption("남편·아내 각각의 연금과 기대수명을 입력하세요.")
 
     # 연금 종류 라벨 <-> 내부 코드 매핑.
     PENSION_TYPES = {
@@ -172,36 +173,43 @@ def build_inputs():
 
     c1, c2 = st.sidebar.columns(2)
     with c1:
-        st.caption("남편")
-        h_ptype = PENSION_TYPES[st.selectbox("남편 연금종류", list(PENSION_TYPES), key="hpt")]
-        h_birth = st.number_input("남편 출생연도", 1940, 2000, 1965, key="hb")
-        h_nps = st.number_input("남편 연금 월액(원)", 0, 5_000_000, 1_100_000, 50_000, key="hn")
-        h_principal = st.number_input("남편 총 납입원금(원)", 0, 1_000_000_000,
-                                      100_000_000, 5_000_000, key="hpp")
-        h_life = st.number_input("남편 기대수명", 70, 110, 86, key="hl")
+        st.markdown("**남편**")
+        h_ptype = PENSION_TYPES[st.selectbox("연금종류", list(PENSION_TYPES), key="hpt")]
+        h_birth = st.number_input("출생연도", 1940, 2000, 1965, key="hb")
+        h_nps = st.number_input("연금 월액(원)", 0, 5_000_000, 1_100_000, 50_000, key="hn")
+        h_principal = st.number_input("총 납입원금(만원)", 0, 100_000, 10_000, 100,
+                                      key="hpp", help="지금까지 납입한 총 보험료") * 10_000
+        h_life = st.number_input("기대수명", 70, 110, 86, key="hl")
         # 추납/임의가입은 국민연금 전용 → 직역연금(교직원·공무원)이면 비활성화.
         h_dbtype = h_ptype != "nps"
-        h_chunap_y = st.number_input("남편 추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype)
-        h_chunap_c = st.number_input("남편 추납비용(원)", 0, 200_000_000, 0, 1_000_000,
-                                     key="hcc", disabled=h_dbtype)
+        h_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype)
+        h_chunap_c = st.number_input("추납비용(만원)", 0, 20_000, 0, 100,
+                                     key="hcc", disabled=h_dbtype) * 10_000
     with c2:
-        st.caption("아내")
-        w_ptype = PENSION_TYPES[st.selectbox("아내 연금종류", list(PENSION_TYPES),
+        st.markdown("**아내**")
+        w_ptype = PENSION_TYPES[st.selectbox("연금종류", list(PENSION_TYPES),
                                              index=0, key="wpt")]
-        w_birth = st.number_input("아내 출생연도", 1940, 2000, 1967, key="wb")
-        w_nps = st.number_input("아내 연금 월액(원)", 0, 5_000_000, 700_000, 50_000, key="wn")
-        w_principal = st.number_input("아내 총 납입원금(원)", 0, 1_000_000_000,
-                                      80_000_000, 5_000_000, key="wpp")
-        w_life = st.number_input("아내 기대수명", 70, 110, 90, key="wl")
+        w_birth = st.number_input("출생연도", 1940, 2000, 1967, key="wb")
+        w_nps = st.number_input("연금 월액(원)", 0, 5_000_000, 700_000, 50_000, key="wn")
+        w_principal = st.number_input("총 납입원금(만원)", 0, 100_000, 8_000, 100,
+                                      key="wpp", help="지금까지 납입한 총 보험료") * 10_000
+        w_life = st.number_input("기대수명", 70, 110, 90, key="wl")
         w_dbtype = w_ptype != "nps"
-        w_chunap_y = st.number_input("아내 추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype)
-        w_chunap_c = st.number_input("아내 추납비용(원)", 0, 200_000_000, 0, 1_000_000,
-                                     key="wcc", disabled=w_dbtype)
+        w_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype)
+        w_chunap_c = st.number_input("추납비용(만원)", 0, 20_000, 0, 100,
+                                     key="wcc", disabled=w_dbtype) * 10_000
 
-    st.sidebar.header("💰 생활/자산")
-    retire_age = st.sidebar.number_input("은퇴나이(남편 기준)", 50, 75, 60)
-    living = st.sidebar.number_input("월 생활비(부부합산, 원)", 0, 20_000_000, 3_000_000, 100_000)
-    single_ratio = st.sidebar.slider("단독생존 생활비 비율", 0.4, 1.0, 0.65, 0.05)
+    st.sidebar.divider()
+    st.sidebar.markdown("### 생활·자산")
+    c3, c4 = st.sidebar.columns(2)
+    retire_age = c3.number_input("은퇴나이", 50, 75, 60, help="남편 기준")
+    living = c4.number_input("월 생활비(만원)", 0, 2_000, 300, 10,
+                             help="부부 합산") * 10_000
+    assets = c3.number_input("금융자산(억원)", 0.0, 500.0, 2.0, 0.1) * 100_000_000
+    single_ratio = c4.number_input("단독생존 생활비율", 0.4, 1.0, 0.65, 0.05,
+                                   help="1인 가구 생활비 비율")
+    invest = c3.number_input("투자수익률(%)", 0.0, 10.0, 3.0, 0.5) / 100
+    inflation = c4.number_input("물가상승률(%)", 0.0, 6.0, 2.0, 0.5) / 100
     SURV_MODES = {
         "자동(유리한 쪽 선택)": "auto",
         "본인연금 + 유족 일부": "own_plus",
@@ -210,16 +218,15 @@ def build_inputs():
     survivor_mode = SURV_MODES[st.sidebar.selectbox(
         "배우자 사망 시 유족연금 처리", list(SURV_MODES),
         help="본인 노령연금+유족연금 일부 vs 유족연금 전액 중 무엇을 받을지. 자동은 유리한 쪽을 택합니다.")]
-    assets = st.sidebar.number_input("금융자산(원)", 0, 5_000_000_000, 200_000_000, 10_000_000)
-    invest = st.sidebar.slider("투자수익률(연,%)", 0.0, 10.0, 3.0, 0.5) / 100
-    inflation = st.sidebar.slider("물가상승률(연,%)", 0.0, 6.0, 2.0, 0.5) / 100
 
-    st.sidebar.header("🏠 주택연금")
+    st.sidebar.divider()
+    st.sidebar.markdown("### 주택연금")
     use_house = st.sidebar.checkbox("주택연금 사용", True)
-    house_val = st.sidebar.number_input("주택가격(원)", 0, 5_000_000_000, 500_000_000, 10_000_000)
-    house_cap = st.sidebar.number_input(
-        "주택가격 상한(원)", 0, 5_000_000_000, 1_200_000_000, 100_000_000,
-        help="이 금액을 초과하는 주택도 상한 기준으로 월지급액이 산정됩니다(현행 12억).")
+    c5, c6 = st.sidebar.columns(2)
+    house_val = c5.number_input("주택가격(억원)", 0.0, 500.0, 5.0, 0.1) * 100_000_000
+    house_cap = c6.number_input(
+        "상한(억원)", 0.0, 500.0, 12.0, 0.5,
+        help="이 금액을 초과하는 주택도 상한 기준으로 월지급액이 산정됩니다(현행 12억).") * 100_000_000
     auto_house = st.sidebar.checkbox("주택가격 기준 자동산정(상한 반영)", True)
     _hpol = HousingPolicy(house_price_cap=house_cap)
     if auto_house:
@@ -230,15 +237,16 @@ def build_inputs():
             "주택연금 개시나이(연소자 기준, 미리보기)", 55, 90, 70, 1,
             help="HF 계산기는 부부 중 연소자 나이 기준입니다. 이 나이의 예상 월지급액을 보여줍니다.")
         preview = hp.monthly_payment(house_monthly, preview_age, _hpol)
-        st.sidebar.success(f"👉 {preview_age}세 개시 시 예상 월지급액: **{preview:,.0f}원**")
-        st.sidebar.caption(f"(HF 종신·정액형 표 기준 / 60세 환산 기준액 {house_monthly:,.0f}원)")
+        st.sidebar.success(f"{preview_age}세 개시 시 예상 월지급액: **{preview:,.0f}원**")
+        st.sidebar.caption(f"HF 종신·정액형 표 기준 (60세 환산 기준액 {house_monthly:,.0f}원)")
         if house_val > house_cap:
             st.sidebar.caption(f"⚠️ 주택가격이 상한({house_cap/1e8:.0f}억) 초과 → 상한 기준으로 산정")
     else:
         house_monthly = st.sidebar.number_input(
-            "주택연금 기준월지급액(원)", 0, 10_000_000, 1_200_000, 50_000)
+            "주택연금 기준월지급액(만원)", 0, 1_000, 120, 5) * 10_000
 
-    st.sidebar.header("⚙️ 제도 파라미터(고급)")
+    st.sidebar.divider()
+    st.sidebar.markdown("### 제도 파라미터 (고급)")
     with st.sidebar.expander("국민연금 감액/가산/계수"):
         early = st.number_input("조기수령 월감액률(%)", 0.0, 2.0, 0.5, 0.05) / 100
         defer = st.number_input("연기수령 월가산률(%)", 0.0, 2.0, 0.6, 0.05) / 100
