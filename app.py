@@ -24,7 +24,7 @@ import visualization as viz
 import export
 from cashflow import simulate, build_strategy_from_user
 from config import (
-    Config, NpsPolicy, TeacherPolicy, HousingPolicy, OptimizerConfig,
+    Config, NpsPolicy, TeacherPolicy, GovPolicy, HousingPolicy, OptimizerConfig,
     Person, UserInput,
 )
 
@@ -121,7 +121,11 @@ def build_inputs():
     st.sidebar.header("👫 부부 기본정보")
 
     # 연금 종류 라벨 <-> 내부 코드 매핑.
-    PENSION_TYPES = {"국민연금": "nps", "교직원연금(사학연금)": "teacher"}
+    PENSION_TYPES = {
+        "국민연금": "nps",
+        "교직원연금(사학연금)": "teacher",
+        "공무원연금": "gov",
+    }
 
     c1, c2 = st.sidebar.columns(2)
     with c1:
@@ -132,11 +136,11 @@ def build_inputs():
         h_principal = st.number_input("남편 총 납입원금(원)", 0, 1_000_000_000,
                                       100_000_000, 5_000_000, key="hpp")
         h_life = st.number_input("남편 기대수명", 70, 110, 86, key="hl")
-        # 추납/임의가입은 국민연금 전용 → 교직원연금이면 비활성화.
-        h_teacher = h_ptype == "teacher"
-        h_chunap_y = st.number_input("남편 추납기간(년)", 0, 20, 0, key="hcy", disabled=h_teacher)
+        # 추납/임의가입은 국민연금 전용 → 직역연금(교직원·공무원)이면 비활성화.
+        h_dbtype = h_ptype != "nps"
+        h_chunap_y = st.number_input("남편 추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype)
         h_chunap_c = st.number_input("남편 추납비용(원)", 0, 200_000_000, 0, 1_000_000,
-                                     key="hcc", disabled=h_teacher)
+                                     key="hcc", disabled=h_dbtype)
     with c2:
         st.caption("아내")
         w_ptype = PENSION_TYPES[st.selectbox("아내 연금종류", list(PENSION_TYPES),
@@ -146,10 +150,10 @@ def build_inputs():
         w_principal = st.number_input("아내 총 납입원금(원)", 0, 1_000_000_000,
                                       80_000_000, 5_000_000, key="wpp")
         w_life = st.number_input("아내 기대수명", 70, 110, 90, key="wl")
-        w_teacher = w_ptype == "teacher"
-        w_chunap_y = st.number_input("아내 추납기간(년)", 0, 20, 0, key="wcy", disabled=w_teacher)
+        w_dbtype = w_ptype != "nps"
+        w_chunap_y = st.number_input("아내 추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype)
         w_chunap_c = st.number_input("아내 추납비용(원)", 0, 200_000_000, 0, 1_000_000,
-                                     key="wcc", disabled=w_teacher)
+                                     key="wcc", disabled=w_dbtype)
 
     st.sidebar.header("💰 생활/자산")
     retire_age = st.sidebar.number_input("은퇴나이(남편 기준)", 50, 75, 60)
@@ -172,8 +176,15 @@ def build_inputs():
         house_factor = st.number_input("주택연금 나이계수(1세당,%)", 0.0, 20.0, 6.0, 0.5) / 100
         discount = st.number_input("현재가치 할인율(%)", 0.0, 10.0, 2.0, 0.5) / 100
     with st.sidebar.expander("교직원연금(사학연금) 파라미터"):
-        t_early = st.number_input("조기퇴직연금 연감액률(%)", 0.0, 10.0, 5.0, 0.5) / 100
-        t_surv = st.number_input("교직원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0) / 100
+        t_early = st.number_input("조기퇴직연금 연감액률(%)", 0.0, 10.0, 5.0, 0.5,
+                                  key="te") / 100
+        t_surv = st.number_input("교직원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0,
+                                 key="ts") / 100
+    with st.sidebar.expander("공무원연금 파라미터"):
+        g_early = st.number_input("조기퇴직연금 연감액률(%)", 0.0, 10.0, 5.0, 0.5,
+                                  key="ge") / 100
+        g_surv = st.number_input("공무원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0,
+                                 key="gs") / 100
 
     # --- 객체 조립 ---
     husband = Person("남편", h_birth, nps_monthly=h_nps, pension_type=h_ptype,
@@ -196,6 +207,7 @@ def build_inputs():
         nps=NpsPolicy(early_monthly_reduction=early, defer_monthly_increase=defer,
                       survivor_pension_rate=surv),
         teacher=TeacherPolicy(early_yearly_reduction=t_early, survivor_pension_rate=t_surv),
+        gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv),
         housing=HousingPolicy(age_factor_per_year=house_factor),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
@@ -228,7 +240,7 @@ def render_view(df, view: str, title: str):
 
 def main():
     st.title("👴👵 부부 노후자금 통합 시뮬레이터")
-    st.caption("국민연금·교직원연금·주택연금·추납·임의가입·물가·기대수명을 통합해 월 단위 현금흐름을 시뮬레이션합니다.")
+    st.caption("국민연금·교직원연금·공무원연금·주택연금·추납·임의가입·물가·기대수명을 통합해 월 단위 현금흐름을 시뮬레이션합니다.")
 
     user, cfg = build_inputs()
 

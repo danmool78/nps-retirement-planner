@@ -138,6 +138,40 @@ class TeacherPolicy:
 
 
 # ---------------------------------------------------------------------------
+# 2-c. 제도(공무원연금) 파라미터
+# ---------------------------------------------------------------------------
+@dataclass
+class GovPolicy:
+    """
+    공무원연금 관련 제도 파라미터.
+
+    공무원연금은 사학연금(교직원연금)과 산식이 동일하다(사학연금이 공무원연금을 준용).
+    - 조기퇴직연금 감액 '연 5%', 연기 가산 없음, 개시연령 60→65 단계 상향, 물가연동, 유족 60%.
+    계산 모듈(gov_pension.py)은 사학연금 로직을 그대로 재사용하되, 파라미터는 이 클래스로
+    별도 관리하여 향후 제도가 갈라져도 독립적으로 조정할 수 있게 한다.
+    """
+
+    early_yearly_reduction: float = 0.05
+    max_early_years: int = 5
+    defer_yearly_increase: float = 0.0
+    max_defer_years: int = 0
+
+    start_age_table: List[tuple] = field(
+        default_factory=lambda: [
+            (0, 60),
+            (1958, 61),
+            (1960, 62),
+            (1963, 63),
+            (1966, 64),
+            (1969, 65),
+        ]
+    )
+
+    inflation_indexed: bool = True
+    survivor_pension_rate: float = 0.60
+
+
+# ---------------------------------------------------------------------------
 # 3. 최적화 파라미터
 # ---------------------------------------------------------------------------
 @dataclass
@@ -272,6 +306,7 @@ class Config:
 
     nps: NpsPolicy = field(default_factory=NpsPolicy)
     teacher: TeacherPolicy = field(default_factory=TeacherPolicy)
+    gov: GovPolicy = field(default_factory=GovPolicy)
     housing: HousingPolicy = field(default_factory=HousingPolicy)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
 
