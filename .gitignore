@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# 결과/임시 파일
+*.xlsx
+*.csv
+!requirements.txt
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

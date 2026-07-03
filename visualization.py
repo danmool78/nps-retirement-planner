@@ -1,0 +1,179 @@
+"""
+visualization.py
+================
+plotly 기반 그래프 생성 모듈. 각 함수는 하나의 Figure 를 반환하며 Streamlit 에서 렌더링한다.
+
+그래프 목록
+1. fig_monthly_cashflow()      : 연령별 월 현금흐름(수입/지출/순액)
+2. fig_cumulative_assets()     : 연령별 누적자산
+3. fig_nps_by_claim_age()      : 국민연금 수령시점별 총수령액 비교
+4. fig_shortfall_by_housing()  : 주택연금 개시시점별 부족액 비교
+5. fig_heatmap()               : 국민연금 × 주택연금 개시나이 히트맵
+6. fig_shortfall_by_inflation(): 물가상승률별 부족액
+7. fig_best_by_life()          : 기대수명별 유리한 전략 비교
+8. fig_pareto()                : 최적점 표시 Pareto Frontier
+
+모든 금액은 '만원' 단위로 축약 표시(가독성).
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
+from cashflow import Scenario
+
+_MAN = 10_000  # 원 -> 만원
+
+
+# 1) 연령별 월 현금흐름 ------------------------------------------------------
+def fig_monthly_cashflow(sc: Scenario) -> go.Figure:
+    """선택된 전략의 월별 수입/지출/순현금흐름을 남편 나이축으로 표시."""
+    df = sc.frame
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df["husband_age"], y=df["income"] / _MAN,
+                             name="연금 등 수입", line=dict(color="#2E86DE")))
+    fig.add_trace(go.Scatter(x=df["husband_age"], y=df["expense"] / _MAN,
+                             name="생활비 지출", line=dict(color="#E74C3C")))
+    fig.add_trace(go.Scatter(x=df["husband_age"], y=df["net"] / _MAN,
+                             name="순현금흐름", line=dict(color="#27AE60", dash="dot")))
+    fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title="남편 나이",
+                      yaxis_title="월 금액(만원)", hovermode="x unified")
+    return fig
+
+
+# 2) 연령별 누적자산 ---------------------------------------------------------
+def fig_cumulative_assets(sc: Scenario) -> go.Figure:
+    """금융자산 잔액 추이. 0 에 닿는 시점이 자산 고갈."""
+    df = sc.frame
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df["husband_age"], y=df["assets"] / _MAN,
+                             name="금융자산 잔액", fill="tozeroy", line=dict(color="#8E44AD")))
+    fig.update_layout(title="② 연령별 누적자산", xaxis_title="남편 나이",
+                      yaxis_title="금융자산(만원)", hovermode="x unified")
+    return fig
+
+
+# 3) 국민연금 수령시점별 총수령액 -------------------------------------------
+def fig_nps_by_claim_age(df: pd.DataFrame, label: str = "남편") -> go.Figure:
+    """수령개시나이별 명목 총수령액(막대) + 개시시점 월액(선)."""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=df["claim_age"], y=df["total_nominal"] / _MAN,
+                         name="명목 총수령액", marker_color="#2E86DE"))
+    fig.add_trace(go.Scatter(x=df["claim_age"], y=df["monthly"] / _MAN,
+                             name="개시 월수령액", yaxis="y2", line=dict(color="#E67E22")))
+    fig.update_layout(
+        title=f"③ 국민연금 수령시점별 총수령액 비교 ({label})",
+        xaxis_title="수령개시나이",
+        yaxis=dict(title="총수령액(만원)"),
+        yaxis2=dict(title="월수령액(만원)", overlaying="y", side="right"),
+        hovermode="x unified",
+    )
+    return fig
+
+
+# 4) 주택연금 개시시점별 부족액 ---------------------------------------------
+def fig_shortfall_by_housing(df: pd.DataFrame) -> go.Figure:
+    """주택연금 개시나이별 생활비 부족액총합."""
+    fig = px.line(df, x="housing_age", y=df["shortfall_total"] / _MAN, markers=True)
+    fig.update_traces(line_color="#E74C3C")
+    fig.update_layout(title="④ 주택연금 개시시점별 부족액 비교",
+                      xaxis_title="주택연금 개시나이", yaxis_title="부족액총합(만원)")
+    return fig
+
+
+# 5) 국민연금 × 주택연금 히트맵 ---------------------------------------------
+def fig_heatmap(df: pd.DataFrame, value: str = "shortfall_total") -> go.Figure:
+    """
+    남편 국민연금 수령나이 × 주택연금 개시나이 조합의 지표 히트맵.
+    (다른 축은 각 (h_claim, housing) 그룹의 최적값으로 집계)
+    """
+    sub = df[df["use_housing"]].copy()
+    if sub.empty:
+        return go.Figure().update_layout(title="⑤ 히트맵 (주택연금 조합 없음)")
+    pivot = sub.pivot_table(index="h_claim", columns="housing", values=value, aggfunc="min")
+    fig = px.imshow(
+        pivot / _MAN,
+        labels=dict(x="주택연금 개시나이", y="남편 국민연금 수령나이", color="부족액(만원)"),
+        color_continuous_scale="RdYlGn_r",
+        aspect="auto",
+        text_auto=".0f",
+    )
+    fig.update_layout(title="⑤ 국민연금 × 주택연금 개시나이 히트맵(부족액)")
+    return fig
+
+
+# 6) 물가상승률별 부족액 -----------------------------------------------------
+def fig_shortfall_by_inflation(df: pd.DataFrame) -> go.Figure:
+    """물가상승률 시나리오별 부족액총합."""
+    fig = px.bar(df, x=(df["inflation"] * 100), y=df["shortfall_total"] / _MAN)
+    fig.update_traces(marker_color="#C0392B")
+    fig.update_layout(title="⑥ 물가상승률별 생활비 부족액",
+                      xaxis_title="물가상승률(%)", yaxis_title="부족액총합(만원)")
+    return fig
+
+
+# 7) 기대수명별 유리한 전략 --------------------------------------------------
+def fig_best_by_life(df: pd.DataFrame) -> go.Figure:
+    """기대수명별 최적 전략의 총수령액/잔여자산 비교 + 채택 수령나이 주석."""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=df["life"], y=df["total_pv"] / _MAN,
+                         name="총수령액(현재가치)", marker_color="#2E86DE"))
+    fig.add_trace(go.Bar(x=df["life"], y=df["bequest"] / _MAN,
+                         name="잔여자산(상속)", marker_color="#27AE60"))
+    # 각 막대 위에 채택된 수령나이 조합 주석.
+    for _, r in df.iterrows():
+        fig.add_annotation(x=r["life"], y=(r["total_pv"] / _MAN),
+                           text=f"국민{int(r['h_claim'])}/{int(r['w_claim'])}세",
+                           showarrow=False, yshift=12, font=dict(size=10))
+    fig.update_layout(title="⑦ 기대수명별 유리한 전략 비교", barmode="group",
+                      xaxis_title="기대수명(세)", yaxis_title="금액(만원)")
+    return fig
+
+
+# 8) Pareto Frontier ---------------------------------------------------------
+def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = None) -> go.Figure:
+    """
+    전체 조합 산점도 위에 파레토 경계와 최적점을 강조.
+    x축: 총수령액(현재가치), y축: 부족액총합(작을수록 좋음).
+    """
+    fig = go.Figure()
+    # 전체 조합(회색 점).
+    fig.add_trace(go.Scatter(
+        x=df["total_pv"] / _MAN, y=df["shortfall_total"] / _MAN,
+        mode="markers", name="전체 조합",
+        marker=dict(color="lightgray", size=6),
+        text=[f"국민{h}/{w}세" for h, w in zip(df["h_claim"], df["w_claim"])],
+    ))
+    # 파레토 경계(빨간 선+점).
+    fig.add_trace(go.Scatter(
+        x=pareto["total_pv"] / _MAN, y=pareto["shortfall_total"] / _MAN,
+        mode="lines+markers", name="Pareto 경계",
+        line=dict(color="#E74C3C"), marker=dict(size=9, color="#E74C3C"),
+    ))
+    # 최적점 강조.
+    if best_id is not None and best_id in df["id"].values:
+        b = df[df["id"] == best_id].iloc[0]
+        fig.add_trace(go.Scatter(
+            x=[b["total_pv"] / _MAN], y=[b["shortfall_total"] / _MAN],
+            mode="markers", name="추천 최적점",
+            marker=dict(size=16, color="#F1C40F", symbol="star",
+                        line=dict(width=1, color="black")),
+        ))
+    fig.update_layout(title="⑧ Pareto Frontier (총수령액↑ · 부족액↓)",
+                      xaxis_title="총수령액 현재가치(만원)",
+                      yaxis_title="부족액총합(만원)")
+    return fig
+
+
+# 조합별 점수 산점도(보너스) -------------------------------------------------
+def fig_score_scatter(df: pd.DataFrame, view: str = "stable") -> go.Figure:
+    """총수령액 대비 잔여자산 산점도, 색상=관점 점수."""
+    fig = px.scatter(
+        df, x=df["total_pv"] / _MAN, y=df["bequest"] / _MAN,
+        color=df[f"score_{view}"], color_continuous_scale="Viridis",
+        labels=dict(x="총수령액 현재가치(만원)", y="잔여자산(만원)", color="점수"),
+    )
+    fig.update_layout(title=f"조합별 점수 산점도 ({view})")
+    return fig
