@@ -283,12 +283,13 @@ def build_inputs():
     st.sidebar.divider()
     st.sidebar.markdown("### 주택연금")
     use_house = st.sidebar.checkbox("주택연금 사용", True)
-    c5, c6 = st.sidebar.columns(2)
-    house_val = c5.number_input("주택가격(억원)", 0.0, 500.0, 5.0, 0.1) * 100_000_000
-    house_cap = c6.number_input(
-        "상한(억원)", 0.0, 500.0, 12.0, 0.5,
-        help="이 금액을 초과하는 주택도 상한 기준으로 월지급액이 산정됩니다(현행 12억).") * 100_000_000
-    auto_house = st.sidebar.checkbox("주택가격 기준 자동산정(상한 반영)", True)
+    house_val = st.sidebar.number_input("주택가격(억원)", 0.0, 500.0, 5.0, 0.1) * 100_000_000
+    auto_house = st.sidebar.checkbox("주택가격 기준 자동산정", True,
+                                     help="주택가격으로 월지급액을 자동 산정(가입 상한 12억 자동 적용).")
+    # 주택가격 상한은 제도값(현행 12억, 공시). 평소엔 접어두고 제도 개정 시에만 조정.
+    with st.sidebar.expander("주택연금 상한(제도값)"):
+        house_cap = st.number_input("주택가격 상한(억원)", 0.0, 500.0, 12.0, 0.5,
+                                    help="주택연금 가입·산정 상한(현행 12억). 제도 개정 시에만 변경.") * 100_000_000
     _hpol = HousingPolicy(house_price_cap=house_cap)
     if auto_house:
         # 내부 기준월지급액은 60세 기준으로 저장(시뮬레이션이 개시나이별로 환산).
