@@ -304,6 +304,8 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
     # 주택연금을 쓰면 주택은 대출상환에 소진된다고 가정하여 상속가치에서 제외.
     sim_years = total_months // 12
     house_bequest = 0.0 if strat.use_housing else hp.house_value_at(user.house_value, sim_years, cfg.housing)
+    # 기타 재산도 상속에 포함(주택가격 상승률로 성장 가정).
+    other_bequest = hp.house_value_at(user.other_property, sim_years, cfg.housing)
 
     metrics = {
         "total_nominal": total_nominal,
@@ -312,7 +314,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
         "shortfall_months": shortfall_months,
         "worst_shortfall": worst_shortfall,
         "depletion_age": depletion_age,
-        "bequest": assets + house_bequest,
+        "bequest": assets + house_bequest + other_bequest,
         "survivor_min_net": survivor_min_net,
         "final_assets": assets,
         "house_bequest": house_bequest,

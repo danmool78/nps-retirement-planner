@@ -242,6 +242,8 @@ def build_inputs():
                                    help="연금 외 근로·임대·이자·개인/퇴직연금 등. 현금흐름과 기초연금 판정에 반영") * 10_000
     other_income_end = c3.number_input("기타소득 유지나이", 55, 110, 100,
                                        help="근로소득처럼 끝나면 낮게, 임대·연금이면 높게(평생=100)")
+    other_property = c4.number_input("기타 재산(억원)", 0.0, 500.0, 0.0, 0.1,
+                                     help="주택·금융자산 외 다른 부동산·자동차 등. 기초연금 판정·상속에 반영") * 100_000_000
     SURV_MODES = {
         "자동(유리한 쪽 선택)": "auto",
         "본인연금 + 유족 일부": "own_plus",
@@ -332,6 +334,7 @@ def build_inputs():
         financial_assets=assets, investment_return=invest, inflation_rate=inflation,
         investment_volatility=volatility,
         other_income_monthly=other_income, other_income_end_age=other_income_end,
+        other_property=other_property,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
         use_housing_pension=use_house, retirement_age=retire_age,
@@ -398,7 +401,8 @@ def estimate_basic_eligibility(user, cfg):
     bp = cfg.basic
     # 소득평가액(월): 공적연금 + 연금 외 기타소득(근로·임대·이자 등).
     pension_income = user.husband.nps_monthly + user.wife.nps_monthly + user.other_income_monthly
-    general = max(0.0, user.house_value - bp.property_basic_deduction)
+    # 일반재산 = 주택가격 + 기타 재산(다른 부동산·자동차 등) − 기본재산공제.
+    general = max(0.0, user.house_value + user.other_property - bp.property_basic_deduction)
     financial = max(0.0, user.financial_assets - bp.financial_deduction)
     property_income = (general + financial) * bp.property_conversion_rate / 12.0
     income_recognition = pension_income + property_income

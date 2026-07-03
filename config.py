@@ -344,6 +344,10 @@ class UserInput:
     # 기타소득이 유지되는 남편 나이(근로소득처럼 끝나면 낮게, 임대·연금이면 높게/평생).
     other_income_end_age: int = 100
 
+    # 기타 재산(주택·금융자산 외: 다른 부동산·자동차·전월세보증금 등, 원).
+    # 기초연금 소득인정액(재산환산)과 사망시 상속(잔여자산)에 반영된다.
+    other_property: float = 0.0
+
     # 물가상승률(기본 시나리오). 민감도 분석은 OptimizerConfig 에서 별도 탐색.
     inflation_rate: float = 0.02
 
