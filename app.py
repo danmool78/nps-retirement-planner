@@ -196,6 +196,12 @@ def build_inputs():
     }
     # 국민연금 기준소득월액 상한(현행 약 617만원). 추납보험료 산정 시 이 이상 소득은 상한 적용.
     PREMIUM_INCOME_CAP = 6_170_000
+    # 국민연금 월액 → 월소득 역산 근사(소득대체율 약 33% 가정 → 소득 ≈ 연금월액 × 3).
+    NPS_TO_INCOME_MULT = 3.0
+
+    def _income_default(nps_won):
+        """국민연금 월액(원)에서 월소득 기본값(만원 정수)을 역산."""
+        return int(min(nps_won * NPS_TO_INCOME_MULT, PREMIUM_INCOME_CAP) / 10_000)
 
     c1, c2 = st.sidebar.columns(2)
     with c1:
@@ -210,8 +216,9 @@ def build_inputs():
         h_dbtype = h_ptype != "nps"
         h_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype,
                                      help="추납으로 메우는 가입연수(연금 증가를 결정)")
-        h_income = st.number_input("월 소득(만원)", 0, 1_000, 300, 10, key="hinc", disabled=h_dbtype,
-                                   help="추납보험료 산정용 벌이. 월보험료=소득×9%(상한 617만원), 비용=기간×12×월보험료") * 10_000
+        h_income = st.number_input("월 소득(만원)", 0, 1_000, _income_default(h_nps), 10,
+                                   key="hinc", disabled=h_dbtype,
+                                   help="국민연금 월액에서 자동 역산한 기본값(소득×9%=월보험료). 실제 벌이로 조정하세요.") * 10_000
         h_premium = min(h_income, PREMIUM_INCOME_CAP) * 0.09  # 월 연금보험료(소득의 9%)
         h_chunap_c = h_chunap_y * 12 * h_premium               # 추납 총비용 자동 계산
         if h_chunap_y > 0 and not h_dbtype:
@@ -228,8 +235,9 @@ def build_inputs():
         w_dbtype = w_ptype != "nps"
         w_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype,
                                      help="추납으로 메우는 가입연수(연금 증가를 결정)")
-        w_income = st.number_input("월 소득(만원)", 0, 1_000, 300, 10, key="winc", disabled=w_dbtype,
-                                   help="추납보험료 산정용 벌이. 월보험료=소득×9%(상한 617만원), 비용=기간×12×월보험료") * 10_000
+        w_income = st.number_input("월 소득(만원)", 0, 1_000, _income_default(w_nps), 10,
+                                   key="winc", disabled=w_dbtype,
+                                   help="국민연금 월액에서 자동 역산한 기본값(소득×9%=월보험료). 실제 벌이로 조정하세요.") * 10_000
         w_premium = min(w_income, PREMIUM_INCOME_CAP) * 0.09
         w_chunap_c = w_chunap_y * 12 * w_premium
         if w_chunap_y > 0 and not w_dbtype:
