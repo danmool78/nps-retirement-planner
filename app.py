@@ -32,6 +32,69 @@ st.set_page_config(page_title="부부 노후자금 계획", layout="wide")
 
 
 # ---------------------------------------------------------------------------
+# 그래프별 '읽는 법' 설명서
+# ---------------------------------------------------------------------------
+GRAPH_GUIDES = {
+    "cashflow": """
+**① 연령별 월 현금흐름** — 추천 전략에서 나이에 따라 매월 들어오고 나가는 돈.
+- 파란선=연금 등 **수입**, 빨간선=**생활비 지출**, 초록점선=**순현금흐름(수입-지출)**.
+- 초록선이 **0 아래로 내려가면** 그 시기에 매달 적자 → 금융자산에서 메꿔야 함.
+- 수입선이 계단식으로 오르는 구간 = 연금이 새로 개시되는 시점.
+""",
+    "assets": """
+**② 연령별 누적자산** — 금융자산 잔액이 나이에 따라 어떻게 변하는지.
+- 선이 **우상향**이면 자산이 불어나는 중, **우하향**이면 헐어 쓰는 중.
+- 선이 **0에 닿는 나이 = 자산 고갈 시점**. 이후에는 생활비 부족이 발생.
+- 사망 시점에 남는 높이 = 상속 가능한 잔여 금융자산.
+""",
+    "receipts": """
+**③ 나이별 누적 수령액·원금확보 시점** — 연금을 언제부터 받느냐에 따른 누적 수령액.
+- 색선 = 개시나이별(조기/정상/연기) 누적 수령액. 위로 갈수록 많이 받은 것.
+- 빨간 점선 = **납입원금**. 색선이 이 선을 넘는 점(●)이 **원금확보(손익분기)**.
+- 회색 점선 = **기대수명**. 원금확보 지점부터 기대수명까지가 **이득 구간**.
+- 원금확보가 **일찍(중간쯤 이전)** 올수록 이득 기간이 길어 유리.
+""",
+    "housing": """
+**④ 주택연금 개시시점별 부족액** — 주택연금을 몇 세에 시작하느냐에 따른 생활비 부족액총합.
+- **낮을수록 좋음**(부족이 적음). 보통 늦게 개시할수록 월지급액이 커져 부족이 줄어듦.
+- 단, 너무 늦추면 그 전까지 부족을 자산으로 버텨야 하니 곡선의 **최저점 부근**이 균형점.
+""",
+    "heatmap": """
+**⑤ 국민연금×주택연금 히트맵** — 두 개시나이 조합별 부족액을 색으로.
+- 세로=국민연금 수령나이, 가로=주택연금 개시나이. **초록=부족 적음(좋음), 빨강=부족 많음**.
+- 초록이 몰린 영역이 안전한 조합대. 칸의 숫자는 부족액(만원).
+""",
+    "inflation": """
+**⑥ 물가상승률별 부족액** — 물가가 1%·2%·3%일 때 각각의 생활비 부족액.
+- 물가는 예측 불가하므로 "물가가 오르면 부족이 얼마나 커지나"의 **민감도**를 봄.
+- 막대가 급격히 커지면 그 전략은 **고물가에 취약**. 완만하면 물가에 견고.
+""",
+    "life": """
+**⑦ 기대수명별 유리한 전략** — 기대수명(83·88·93세)마다 최적 전략의 총수령액·상속.
+- 오래 살 것으로 볼수록 **연기수령**이 유리해지는 경향(막대 위 채택 나이 참고).
+- 자신의 건강·가족력에 맞는 기대수명 시나리오의 막대를 보면 됨.
+""",
+    "pareto": """
+**⑧ Pareto Frontier** — 총수령액(→클수록 좋음)과 부족액(↑작을수록 좋음)의 트레이드오프.
+- **빨간 선 위의 점들만이 후보**(다른 조합에 지배당하지 않는 최선의 집합).
+- 회색 점은 무시. ⭐노란 별 = 추천 균형점.
+- 선을 따라 **오른쪽으로 갈수록 많이 받지만 부족 위험↑**, **왼쪽 아래일수록 안전**.
+""",
+    "scatter": """
+**⑨ 조합별 점수 산점도** — 총수령액(→)과 잔여자산(↑)에 종합점수를 색으로.
+- **밝은(노란) 점 = 종합점수 높음**, 어두운 점 = 낮음.
+- **밝으면서 오른쪽 위**(많이 받고 많이 남김)에 있는 점이 최선.
+""",
+}
+
+
+def guide(key: str):
+    """그래프 아래에 접이식 '읽는 법' 설명을 렌더링."""
+    with st.expander("📖 이 그래프 읽는 법"):
+        st.markdown(GRAPH_GUIDES[key])
+
+
+# ---------------------------------------------------------------------------
 # 사이드바 입력 → UserInput / Config
 # ---------------------------------------------------------------------------
 def build_inputs():
@@ -212,8 +275,10 @@ def main():
     g1, g2 = st.columns(2)
     with g1:
         st.plotly_chart(viz.fig_monthly_cashflow(best_scenario), use_container_width=True)
+        guide("cashflow")
     with g2:
         st.plotly_chart(viz.fig_cumulative_assets(best_scenario), use_container_width=True)
+        guide("assets")
 
     # ③ 나이별 누적 수령액·원금확보 시점 — 남편/아내 각각(기대수명까지 그림).
     g3, g3b = st.columns(2)
@@ -223,31 +288,37 @@ def main():
         st.plotly_chart(
             viz.fig_cumulative_receipts(h_curves, h_prin, h_be, h_death, h_reps, h_lbl),
             use_container_width=True)
+        guide("receipts")
     with g3b:
         w_lbl = f"아내·{pension.type_label(user.wife)}"
         w_curves, w_prin, w_be, w_death, w_reps = opt.cumulative_receipts_curves(user, cfg, "wife")
         st.plotly_chart(
             viz.fig_cumulative_receipts(w_curves, w_prin, w_be, w_death, w_reps, w_lbl),
             use_container_width=True)
+        guide("receipts")
 
     g4, g5 = st.columns(2)
     with g4:
         if user.use_housing_pension:
             hdf = opt.shortfall_by_housing_age(user, cfg)
             st.plotly_chart(viz.fig_shortfall_by_housing(hdf), use_container_width=True)
+            guide("housing")
         else:
             st.info("주택연금 미사용 — ④ 그래프 생략")
     with g5:
         st.plotly_chart(viz.fig_heatmap(df, "shortfall_total"), use_container_width=True)
+        guide("heatmap")
 
     g6, g7 = st.columns(2)
     with g6:
         idf = opt.shortfall_by_inflation(user, cfg)
         st.plotly_chart(viz.fig_shortfall_by_inflation(idf), use_container_width=True)
+        guide("inflation")
     with g7:
         with st.spinner("기대수명별 최적 전략 탐색..."):
             ldf = opt.best_strategy_by_life(user, cfg, "stable")
         st.plotly_chart(viz.fig_best_by_life(ldf), use_container_width=True)
+        guide("life")
 
     g8, g9 = st.columns(2)
     with g8:
@@ -255,8 +326,10 @@ def main():
             viz.fig_pareto(df, pareto, best_id=int(best_row["id"])),
             use_container_width=True,
         )
+        guide("pareto")
     with g9:
         st.plotly_chart(viz.fig_score_scatter(df, "stable"), use_container_width=True)
+        guide("scatter")
 
     # 4) 내보내기 ------------------------------------------------------------
     st.header("💾 내보내기")
