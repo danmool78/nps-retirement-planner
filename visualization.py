@@ -220,6 +220,19 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
     x축: 총수령액(현재가치), y축: 부족액총합(작을수록 좋음).
     """
     fig = go.Figure()
+
+    # --- 안전/위험 배경색(가로 띠). 아래(부족 적음)=안전, 위(부족 많음)=위험 ---
+    # 안전 경계: 최대 부족액의 15% 지점(전부 0이면 작은 기본값)을 기준선으로 둔다.
+    max_sf = float(df["shortfall_total"].max()) / _MAN
+    safe_line = max_sf * 0.15 if max_sf > 0 else 1.0
+    top = max_sf * 1.05 if max_sf > 0 else 10.0
+    fig.add_hrect(y0=0, y1=safe_line, fillcolor="#27AE60", opacity=0.08, line_width=0,
+                  annotation_text="🟢 안전구간 (부족 거의 없음)", annotation_position="top left",
+                  annotation_font_color="#1E8449")
+    fig.add_hrect(y0=safe_line, y1=top, fillcolor="#E74C3C", opacity=0.07, line_width=0,
+                  annotation_text="🔴 위험구간 (부족 큼)", annotation_position="top left",
+                  annotation_font_color="#C0392B")
+
     # 전체 조합(회색 점).
     fig.add_trace(go.Scatter(
         x=df["total_pv"] / _MAN, y=df["shortfall_total"] / _MAN,
@@ -233,15 +246,24 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
         mode="lines+markers", name="Pareto 경계",
         line=dict(color="#E74C3C"), marker=dict(size=9, color="#E74C3C"),
     ))
-    # 최적점 강조.
+    # 최적점 강조 + 주석.
     if best_id is not None and best_id in df["id"].values:
         b = df[df["id"] == best_id].iloc[0]
+        bx = float(b["total_pv"]) / _MAN
+        by = float(b["shortfall_total"]) / _MAN
+        housing = f"주택 {int(b['housing'])}세" if b.get("use_housing") else "주택 미사용"
         fig.add_trace(go.Scatter(
-            x=[b["total_pv"] / _MAN], y=[b["shortfall_total"] / _MAN],
-            mode="markers", name="추천 최적점",
-            marker=dict(size=16, color="#F1C40F", symbol="star",
-                        line=dict(width=1, color="black")),
+            x=[bx], y=[by], mode="markers", name="⭐추천 최적점",
+            marker=dict(size=18, color="#F1C40F", symbol="star",
+                        line=dict(width=1.2, color="black")),
         ))
+        fig.add_annotation(
+            x=bx, y=by,
+            text=f"⭐ 추천: 부족 0 + 최대수령<br>국민 {int(b['h_claim'])}/{int(b['w_claim'])}세 · {housing}",
+            showarrow=True, arrowhead=2, ax=30, ay=40,
+            font=dict(size=11, color="#B7950B"), bgcolor="rgba(255,255,255,0.75)",
+            bordercolor="#F1C40F", borderwidth=1,
+        )
     fig.update_layout(title="⑧ Pareto Frontier (총수령액↑ · 부족액↓)",
                       xaxis_title="총수령액 현재가치(만원)",
                       yaxis_title="부족액총합(만원)")
