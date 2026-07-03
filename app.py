@@ -27,7 +27,8 @@ import visualization as viz
 import export
 from cashflow import simulate, build_strategy_from_user
 from config import (
-    Config, NpsPolicy, TeacherPolicy, GovPolicy, HousingPolicy, OptimizerConfig,
+    Config, NpsPolicy, TeacherPolicy, GovPolicy, HousingPolicy,
+    TaxPolicy, BasicPensionPolicy, OptimizerConfig,
     Person, UserInput,
 )
 
@@ -40,7 +41,8 @@ st.set_page_config(page_title="부부 노후자금 계획", layout="wide")
 GRAPH_GUIDES = {
     "cashflow": """
 **① 연령별 월 현금흐름** — 추천 전략에서 나이에 따라 매월 들어오고 나가는 돈.
-- 파란선=연금 등 **수입**, 빨간선=**생활비 지출**, 초록점선=**순현금흐름(수입-지출)**.
+- 파란선=**수입(실수령)**, 빨간선=**생활비 지출**, 초록점선=**순현금흐름(수입-지출)**.
+- 수입은 **세금·건강보험료를 뺀 실수령**이며, 65세부터 **기초연금**이 더해집니다.
 - 초록선이 **0 아래로 내려가면** 그 시기에 매달 적자 → 금융자산에서 메꿔야 함.
 - 수입선이 계단식으로 오르는 구간 = 연금이 새로 개시되는 시점.
 - ⚰️ **세로 점선 = 사망 시점**(남편/아내). 회색 음영 = **홀로 생존 구간**으로,
@@ -218,6 +220,9 @@ def build_inputs():
     survivor_mode = SURV_MODES[st.sidebar.selectbox(
         "배우자 사망 시 유족연금 처리", list(SURV_MODES),
         help="본인 노령연금+유족연금 일부 vs 유족연금 전액 중 무엇을 받을지. 자동은 유리한 쪽을 택합니다.")]
+    basic_eligible = st.sidebar.checkbox(
+        "기초연금 수급 대상", True,
+        help="만 65세 이상·소득하위 70% 요건. 자산/소득이 많으면 대상이 아닐 수 있어 직접 선택합니다.")
 
     st.sidebar.divider()
     st.sidebar.markdown("### 주택연금")
@@ -264,6 +269,13 @@ def build_inputs():
                                   key="ge") / 100
         g_surv = st.number_input("공무원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0,
                                  key="gs") / 100
+    with st.sidebar.expander("세금·건보·기초연금"):
+        tax_rate = st.number_input("연금소득 실효세율(%)", 0.0, 30.0, 4.0, 0.5,
+                                   help="국민·직역·유족연금에 적용(주택연금·기초연금 제외)") / 100
+        health_rate = st.number_input("건강보험료율(연금대비,%)", 0.0, 20.0, 4.0, 0.5,
+                                      help="은퇴 후 지역가입 근사") / 100
+        basic_amt = st.number_input("기초연금 단독 월지급액(만원)", 0, 100, 34, 1) * 10_000
+        basic_couple_red = st.number_input("부부 동시수급 감액률(%)", 0.0, 50.0, 20.0, 5.0) / 100
 
     # --- 객체 조립 ---
     husband = Person("남편", h_birth, nps_monthly=h_nps, pension_type=h_ptype,
@@ -276,7 +288,7 @@ def build_inputs():
     user = UserInput(
         husband=husband, wife=wife,
         living_expense_monthly=living, single_expense_ratio=single_ratio,
-        survivor_mode=survivor_mode,
+        survivor_mode=survivor_mode, basic_pension_eligible=basic_eligible,
         financial_assets=assets, investment_return=invest, inflation_rate=inflation,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
@@ -291,6 +303,8 @@ def build_inputs():
         gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv,
                       survivor_dup_rate=dup),
         housing=HousingPolicy(house_price_cap=house_cap),
+        tax=TaxPolicy(pension_tax_rate=tax_rate, health_insurance_rate=health_rate),
+        basic=BasicPensionPolicy(single_amount=basic_amt, couple_reduction=basic_couple_red),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
     return user, cfg
@@ -492,6 +506,9 @@ def main():
             ("물가상승률", f"{user.inflation_rate*100:.1f}%"),
             ("주택", (f"{user.house_value:,.0f}원 · 주택연금 월 {user.housing_monthly_base:,.0f}원"
                       if user.use_housing_pension else "주택연금 미사용")),
+            ("세금·건보 / 기초연금",
+             f"연금소득 실효 {(cfg.tax.pension_tax_rate+cfg.tax.health_insurance_rate)*100:.0f}% 차감 · "
+             f"기초연금 {'수급' if user.basic_pension_eligible else '비대상'}"),
         ],
     }
     report_bytes = export.build_html_report(report_figs, tops, summary)

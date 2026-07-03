@@ -128,6 +128,10 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
     r_disc = monthly_rate(cfg.optimizer.discount_rate)
     disc_base = 1.0 + r_disc
 
+    # 세금·건보 실효율(공적연금 실수령 계수)과 기초연금 정책.
+    net_factor = max(0.0, 1.0 - cfg.tax.pension_tax_rate - cfg.tax.health_insurance_rate)
+    bp = cfg.basic
+
     # 부부 각자의 연금 계산 모듈/정책(국민연금 vs 교직원연금)을 미리 확정.
     h_mod, h_pol = pension.resolve(user.husband, cfg)
     w_mod, w_pol = pension.resolve(user.wife, cfg)
@@ -216,7 +220,25 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
                 house_base, years_since, strat.inflation_rate, cfg.housing
             )
 
-        income = h_pension + w_pension + survivor_extra + house_income
+        # --- 3-b) 세금·건강보험료(공적연금·유족연금에만) → 실수령 반영 ---
+        taxable = h_pension + w_pension + survivor_extra  # 과세·건보 대상(주택연금 제외)
+        net_taxable = taxable * net_factor                # 세후·건보 후 실수령
+
+        # --- 3-c) 기초연금(65세 이상, 비과세). 부부 동시 수급 시 각 감액 ---
+        basic_pension = 0.0
+        if user.basic_pension_eligible:
+            bp_amt = bp.single_amount * ((1.0 + strat.inflation_rate) ** year_idx
+                                         if bp.inflation_indexed else 1.0)
+            h_gets = h_alive and h_age >= bp.start_age
+            w_gets = w_alive and w_age >= bp.start_age
+            both_gets = h_gets and w_gets
+            if h_gets:
+                basic_pension += bp_amt * (1.0 - bp.couple_reduction if both_gets else 1.0)
+            if w_gets:
+                basic_pension += bp_amt * (1.0 - bp.couple_reduction if both_gets else 1.0)
+
+        # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금).
+        income = net_taxable + basic_pension + house_income
 
         # --- 4) 생활비(물가상승 반영) ---
         both_alive = h_alive and w_alive
@@ -234,10 +256,9 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
             if depletion_age is None:
                 depletion_age = round(h_age, 1)
 
-        # --- 지표 누적 ---
-        pension_income = h_pension + w_pension + survivor_extra + house_income
-        total_nominal += pension_income
-        total_pv += pension_income * (disc_base ** (-m))
+        # --- 지표 누적 (실수령 기준) ---
+        total_nominal += income
+        total_pv += income * (disc_base ** (-m))
         if shortfall > 0:
             shortfall_total += shortfall
             shortfall_months += 1
@@ -253,7 +274,8 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
                 "month": m,
                 "husband_age": round(h_age, 2), "wife_age": round(w_age, 2),
                 "h_pension": h_pension, "w_pension": w_pension,
-                "survivor_pension": survivor_extra, "house_income": house_income,
+                "survivor_pension": survivor_extra, "basic_pension": basic_pension,
+                "net_taxable": net_taxable, "house_income": house_income,
                 "income": income, "expense": expense, "net": net,
                 "assets": assets, "shortfall": shortfall, "both_alive": both_alive,
             })

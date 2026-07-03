@@ -245,6 +245,33 @@ class OptimizerConfig:
 
 
 # ---------------------------------------------------------------------------
+# 3-b. 세금·건강보험료 / 기초연금 정책
+# ---------------------------------------------------------------------------
+@dataclass
+class TaxPolicy:
+    """
+    연금 실수령액 산정용 세금·건강보험료(근사).
+
+    - 국민/교직원/공무원 연금과 유족연금은 '연금소득'으로 과세되고, 은퇴 후 지역 건강보험료도
+      연금소득 기준으로 부과된다(피부양자 탈락 시). 정확한 산식은 연금소득공제·부과점수표 등으로
+      복잡하므로, 여기서는 '연금소득 대비 실효율'로 근사한다(모두 수정 가능).
+    - 주택연금은 대출이므로 과세·건보 부과 대상이 아니다(제외).
+    - 기초연금은 비과세(제외).
+    """
+    pension_tax_rate: float = 0.04        # 연금소득 실효세율(근사)
+    health_insurance_rate: float = 0.04   # 연금소득 대비 건강보험료율(지역가입 근사)
+
+
+@dataclass
+class BasicPensionPolicy:
+    """기초연금(65세 이상, 소득하위 70%) 정책."""
+    single_amount: float = 340_000    # 단독 최대 월지급액(원, 대략 현행)
+    couple_reduction: float = 0.20    # 부부 동시 수급 시 각 20% 감액
+    start_age: int = 65               # 지급 개시 연령
+    inflation_indexed: bool = True    # 매년 물가 반영 인상
+
+
+# ---------------------------------------------------------------------------
 # 4. 사용자(부부) 입력값
 # ---------------------------------------------------------------------------
 @dataclass
@@ -315,6 +342,9 @@ class UserInput:
     # 상속 선호도(0=현금흐름 우선 ~ 1=상속 우선). 관점 선택과 별개로 미세조정에 사용.
     bequest_preference: float = 0.3
 
+    # 기초연금 수급 대상 여부(소득하위 70% 요건은 사용자가 판단해 지정).
+    basic_pension_eligible: bool = True
+
     # 시뮬레이션 시작 나이(남편 기준 은퇴 나이).
     retirement_age: int = 60
 
@@ -327,6 +357,8 @@ class Config:
     teacher: TeacherPolicy = field(default_factory=TeacherPolicy)
     gov: GovPolicy = field(default_factory=GovPolicy)
     housing: HousingPolicy = field(default_factory=HousingPolicy)
+    tax: TaxPolicy = field(default_factory=TaxPolicy)
+    basic: BasicPensionPolicy = field(default_factory=BasicPensionPolicy)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
 
 
