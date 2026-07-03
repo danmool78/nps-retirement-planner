@@ -297,6 +297,10 @@ def build_inputs():
                                       help="은퇴 후 지역가입 근사") / 100
         basic_amt = st.number_input("기초연금 단독 월지급액(만원)", 0, 100, 34, 1) * 10_000
         basic_couple_red = st.number_input("부부 동시수급 감액률(%)", 0.0, 50.0, 20.0, 5.0) / 100
+        basic_crit = st.number_input("기초연금 부부 선정기준액(만원)", 0, 1000, 365, 5,
+                                     help="월 소득인정액이 이 값 이하면 수급 대상(2026 근사)") * 10_000
+        basic_prop_ded = st.number_input("기본재산공제(만원)", 0, 100_000, 13_500, 500,
+                                         help="대도시 기준. 소득인정액 계산 시 주택가격에서 공제") * 10_000
 
     # --- 객체 조립 ---
     husband = Person("남편", h_birth, nps_monthly=h_nps, pension_type=h_ptype,
@@ -326,7 +330,9 @@ def build_inputs():
                       survivor_dup_rate=dup),
         housing=HousingPolicy(house_price_cap=house_cap),
         tax=TaxPolicy(pension_tax_rate=tax_rate, health_insurance_rate=health_rate),
-        basic=BasicPensionPolicy(single_amount=basic_amt, couple_reduction=basic_couple_red),
+        basic=BasicPensionPolicy(single_amount=basic_amt, couple_reduction=basic_couple_red,
+                                 selection_criteria_couple=basic_crit,
+                                 property_basic_deduction=basic_prop_ded),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
     return user, cfg
@@ -352,6 +358,23 @@ def render_view_table(top, view: str, df, title: str):
                 f"상속 {row['bequest']/1e8:.2f}억"
             )
             st.caption(opt.explain(row, df))
+
+
+def estimate_basic_eligibility(user, cfg):
+    """
+    현재 입력값으로 기초연금 '소득인정액'을 근사 계산해 대상 여부를 판정.
+
+    소득인정액 = 공적연금소득(부부 합산) + 재산의 소득환산액
+    재산환산 = [(주택가격 − 기본재산공제) + (금융자산 − 금융공제)] × 환산율 ÷ 12
+    반환: (소득인정액, 선정기준액, 대상여부)
+    """
+    bp = cfg.basic
+    pension_income = user.husband.nps_monthly + user.wife.nps_monthly  # 공적연금 소득(월)
+    general = max(0.0, user.house_value - bp.property_basic_deduction)
+    financial = max(0.0, user.financial_assets - bp.financial_deduction)
+    property_income = (general + financial) * bp.property_conversion_rate / 12.0
+    income_recognition = pension_income + property_income
+    return income_recognition, bp.selection_criteria_couple, income_recognition <= bp.selection_criteria_couple
 
 
 def income_breakdown_table(frame, ages=(65, 70, 75, 80)):
@@ -419,6 +442,20 @@ def main():
 
     st.success(f"총 {R['n']:,}개 조합 평가 완료 "
                f"(물가 {', '.join(f'{x*100:.0f}%' for x in cfg.optimizer.robust_inflations)} 스트레스 반영).")
+
+    # 기초연금 대상 자동판정(소득인정액 근사).
+    ir, crit, elig = estimate_basic_eligibility(user, cfg)
+    if elig:
+        st.info(f"🟢 **기초연금 자동판정**: 소득인정액 ≈ {ir/1e4:,.0f}만원 ≤ 부부기준 {crit/1e4:,.0f}만원 "
+                f"→ **수급 대상 가능**." +
+                ("" if user.basic_pension_eligible
+                 else " (현재 '기초연금 수급 대상' 체크가 꺼져 있어 미반영 — 켜면 반영됩니다.)"))
+    else:
+        st.warning(f"🔴 **기초연금 자동판정**: 소득인정액 ≈ {ir/1e4:,.0f}만원 > 부부기준 {crit/1e4:,.0f}만원 "
+                   f"→ **대상이 아닐 가능성**(자산·연금이 기준 초과)." +
+                   (" 사이드바 '기초연금 수급 대상' 체크를 **꺼주세요**(현재 켜져 있어 과대평가됨)."
+                    if user.basic_pension_eligible else " (현재 체크 꺼짐 — 정상 반영)."))
+        st.caption("소득인정액=공적연금소득+재산환산. 재산공제·환산율은 근사이며 고급 설정에서 조정 가능합니다.")
 
     # 2) 3가지 관점 상위 5개 -------------------------------------------------
     st.header("🏆 성향별 추천 전략 (상위 5)")

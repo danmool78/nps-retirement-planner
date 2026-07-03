@@ -273,6 +273,13 @@ class BasicPensionPolicy:
     start_age: int = 65               # 지급 개시 연령
     inflation_indexed: bool = True    # 매년 물가 반영 인상
 
+    # --- 대상 자동판정(소득인정액)용 파라미터 ---
+    # 소득인정액 = 공적연금소득 + 재산의 소득환산액. 이 값이 선정기준액 이하면 수급 대상.
+    selection_criteria_couple: float = 3_650_000   # 부부 선정기준액(월 소득인정액, 2026 근사)
+    property_basic_deduction: float = 135_000_000  # 기본재산공제(대도시 기준)
+    financial_deduction: float = 20_000_000        # 금융재산 공제
+    property_conversion_rate: float = 0.04         # 재산의 소득환산율(연)
+
 
 # ---------------------------------------------------------------------------
 # 4. 사용자(부부) 입력값
