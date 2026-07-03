@@ -223,8 +223,15 @@ def build_inputs():
     auto_house = st.sidebar.checkbox("주택가격 기준 자동산정(상한 반영)", True)
     _hpol = HousingPolicy(house_price_cap=house_cap)
     if auto_house:
+        # 내부 기준월지급액은 60세 기준으로 저장(시뮬레이션이 개시나이별로 환산).
         house_monthly = int(hp.estimate_base_monthly(house_val, _hpol))
-        st.sidebar.number_input("기준월지급액(자동, 60세 기준·원)", value=house_monthly, disabled=True)
+        # ★ HF 계산기와 직접 비교되도록 '개시 예정나이(연소자 기준)'의 월지급액을 미리보기로 표시.
+        preview_age = st.sidebar.number_input(
+            "주택연금 개시나이(연소자 기준, 미리보기)", 55, 90, 70, 1,
+            help="HF 계산기는 부부 중 연소자 나이 기준입니다. 이 나이의 예상 월지급액을 보여줍니다.")
+        preview = hp.monthly_payment(house_monthly, preview_age, _hpol)
+        st.sidebar.success(f"👉 {preview_age}세 개시 시 예상 월지급액: **{preview:,.0f}원**")
+        st.sidebar.caption(f"(HF 종신·정액형 표 기준 / 60세 환산 기준액 {house_monthly:,.0f}원)")
         if house_val > house_cap:
             st.sidebar.caption(f"⚠️ 주택가격이 상한({house_cap/1e8:.0f}억) 초과 → 상한 기준으로 산정")
     else:
