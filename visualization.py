@@ -42,10 +42,20 @@ def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["net"] / _MAN,
                              name="순현금흐름", line=dict(color="#27AE60", dash="dot")))
 
+    deaths = sorted(deaths or [], key=lambda t: t[1])
+
+    # 첫 사망 ~ 마지막 사망 사이 '홀로 생존 구간'을 옅게 음영 처리(생활비·연금 급변 구간).
+    if len(deaths) == 2 and deaths[1][1] > deaths[0][1]:
+        fig.add_vrect(x0=deaths[0][1], x1=deaths[1][1],
+                      fillcolor="#95A5A6", opacity=0.12, line_width=0,
+                      annotation_text="홀로 생존 구간(생활비↓·유족연금 조정)",
+                      annotation_position="top left", annotation_font_size=10,
+                      annotation_font_color="#566573")
+
     # 사망 시점 세로선(수입·지출이 급변하는 이유를 명시).
-    for label, age in (deaths or []):
+    for label, age in deaths:
         fig.add_vline(x=age, line_dash="dash", line_color="#7F8C8D",
-                      annotation_text=f"⚰️ {label}", annotation_position="top",
+                      annotation_text=f"⚰️ {label} {age:.0f}세", annotation_position="top",
                       annotation_font_size=11, annotation_font_color="#566573")
 
     fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title="남편 나이",
