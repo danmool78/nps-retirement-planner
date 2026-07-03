@@ -424,17 +424,22 @@ def shortfall_by_housing_age(user: UserInput, cfg: Config) -> pd.DataFrame:
 
 def shortfall_by_inflation(user: UserInput, cfg: Config) -> pd.DataFrame:
     """
-    물가상승률 시나리오별 '부족액총합'(기본 전략 고정).
-    그래프6(물가상승률별 부족액)용.
+    물가상승률별 '부족액총합'(기본 전략 고정). 그래프6용.
+
+    사용자가 입력한 물가상승률을 '중심'으로 ±2%p 범위를 잡아, 현재 가정값이 항상 그래프에
+    포함되고 표시되도록 한다(is_current). 이렇게 해야 사이드바 물가 변경이 그래프에 반영된다.
     """
     from cashflow import build_strategy_from_user
 
     base = build_strategy_from_user(user, cfg)
+    center = round(user.inflation_rate, 4)
+    infls = sorted({max(0.0, round(center + d, 4)) for d in (-0.02, -0.01, 0.0, 0.01, 0.02)})
     rows = []
-    for infl in cfg.optimizer.inflation_scenarios:
+    for infl in infls:
         strat = Strategy(**{**base.__dict__, "inflation_rate": infl})
         sc = simulate(user, strat, cfg, record=False)
-        rows.append({"inflation": infl, "shortfall_total": sc.metrics["shortfall_total"]})
+        rows.append({"inflation": infl, "shortfall_total": sc.metrics["shortfall_total"],
+                     "is_current": abs(infl - center) < 1e-9})
     return pd.DataFrame(rows)
 
 

@@ -207,10 +207,17 @@ def fig_heatmap(df: pd.DataFrame, value: str = "shortfall_total") -> go.Figure:
 
 # 6) 물가상승률별 부족액 -----------------------------------------------------
 def fig_shortfall_by_inflation(df: pd.DataFrame) -> go.Figure:
-    """물가상승률 시나리오별 부족액총합."""
-    fig = px.bar(df, x=(df["inflation"] * 100), y=df["shortfall_total"] / _MAN)
-    fig.update_traces(marker_color="#C0392B")
-    fig.update_layout(title="⑥ 물가상승률별 생활비 부족액",
+    """물가상승률별 부족액총합. 현재 가정값(is_current)은 진한 색으로 강조."""
+    # 현재 가정값은 진한 빨강, 나머지는 연한 회색빨강.
+    if "is_current" in df:
+        colors = ["#C0392B" if c else "#E6A9A2" for c in df["is_current"]]
+    else:
+        colors = "#C0392B"
+    fig = go.Figure(go.Bar(x=df["inflation"] * 100, y=df["shortfall_total"] / _MAN,
+                           marker_color=colors,
+                           text=["◀ 현재" if c else "" for c in df.get("is_current", [])],
+                           textposition="outside"))
+    fig.update_layout(title="⑥ 물가상승률별 생활비 부족액(현재값 기준 ±2%p)",
                       xaxis_title="물가상승률(%)", yaxis_title="부족액총합(만원)")
     return fig
 
