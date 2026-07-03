@@ -194,6 +194,8 @@ def build_inputs():
         "교직원연금(사학연금)": "teacher",
         "공무원연금": "gov",
     }
+    # 국민연금 기준소득월액 상한(현행 약 617만원). 추납보험료 산정 시 이 이상 소득은 상한 적용.
+    PREMIUM_INCOME_CAP = 6_170_000
 
     c1, c2 = st.sidebar.columns(2)
     with c1:
@@ -208,11 +210,12 @@ def build_inputs():
         h_dbtype = h_ptype != "nps"
         h_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype,
                                      help="추납으로 메우는 가입연수(연금 증가를 결정)")
-        h_premium = st.number_input("월 보험료(만원)", 0, 60, 25, 1, key="hpm", disabled=h_dbtype,
-                                    help="소득의 9%. 추납 총비용=기간×12×월보험료로 자동 계산") * 10_000
-        h_chunap_c = h_chunap_y * 12 * h_premium  # 추납 총비용 자동 계산
+        h_income = st.number_input("월 소득(만원)", 0, 1_000, 300, 10, key="hinc", disabled=h_dbtype,
+                                   help="추납보험료 산정용 벌이. 월보험료=소득×9%(상한 617만원), 비용=기간×12×월보험료") * 10_000
+        h_premium = min(h_income, PREMIUM_INCOME_CAP) * 0.09  # 월 연금보험료(소득의 9%)
+        h_chunap_c = h_chunap_y * 12 * h_premium               # 추납 총비용 자동 계산
         if h_chunap_y > 0 and not h_dbtype:
-            st.caption(f"추납비용 ≈ {h_chunap_c/1e4:,.0f}만원")
+            st.caption(f"월보험료 ≈ {h_premium/1e4:,.1f}만 → 추납비용 ≈ {h_chunap_c/1e4:,.0f}만원")
     with c2:
         st.markdown("**아내**")
         w_ptype = PENSION_TYPES[st.selectbox("연금종류", list(PENSION_TYPES),
@@ -225,11 +228,12 @@ def build_inputs():
         w_dbtype = w_ptype != "nps"
         w_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype,
                                      help="추납으로 메우는 가입연수(연금 증가를 결정)")
-        w_premium = st.number_input("월 보험료(만원)", 0, 60, 25, 1, key="wpm", disabled=w_dbtype,
-                                    help="소득의 9%. 추납 총비용=기간×12×월보험료로 자동 계산") * 10_000
-        w_chunap_c = w_chunap_y * 12 * w_premium  # 추납 총비용 자동 계산
+        w_income = st.number_input("월 소득(만원)", 0, 1_000, 300, 10, key="winc", disabled=w_dbtype,
+                                   help="추납보험료 산정용 벌이. 월보험료=소득×9%(상한 617만원), 비용=기간×12×월보험료") * 10_000
+        w_premium = min(w_income, PREMIUM_INCOME_CAP) * 0.09
+        w_chunap_c = w_chunap_y * 12 * w_premium
         if w_chunap_y > 0 and not w_dbtype:
-            st.caption(f"추납비용 ≈ {w_chunap_c/1e4:,.0f}만원")
+            st.caption(f"월보험료 ≈ {w_premium/1e4:,.1f}만 → 추납비용 ≈ {w_chunap_c/1e4:,.0f}만원")
 
     st.sidebar.divider()
     st.sidebar.markdown("### 생활·자산")
