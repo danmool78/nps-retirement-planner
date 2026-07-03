@@ -246,9 +246,15 @@ def build_inputs():
     survivor_mode = SURV_MODES[st.sidebar.selectbox(
         "배우자 사망 시 유족연금 처리", list(SURV_MODES),
         help="본인 노령연금+유족연금 일부 vs 유족연금 전액 중 무엇을 받을지. 자동은 유리한 쪽을 택합니다.")]
-    basic_eligible = st.sidebar.checkbox(
-        "기초연금 수급 대상", True,
-        help="만 65세 이상·소득하위 70% 요건. 자산/소득이 많으면 대상이 아닐 수 있어 직접 선택합니다.")
+    BASIC_MODES = {
+        "자동 판정(소득인정액 기준)": "auto",
+        "무조건 수급": "on",
+        "무조건 미수급": "off",
+    }
+    basic_mode = BASIC_MODES[st.sidebar.selectbox(
+        "기초연금 처리", list(BASIC_MODES),
+        help="자동 판정: 입력한 연금·주택·자산으로 소득인정액을 계산해 대상이면 자동 반영, "
+             "아니면 자동 제외합니다. (결과 화면 상단에 판정이 표시됩니다)")]
 
     st.sidebar.divider()
     st.sidebar.markdown("### 주택연금")
@@ -318,7 +324,7 @@ def build_inputs():
     user = UserInput(
         husband=husband, wife=wife,
         living_expense_monthly=living, single_expense_ratio=single_ratio,
-        survivor_mode=survivor_mode, basic_pension_eligible=basic_eligible,
+        survivor_mode=survivor_mode, basic_pension_eligible=True,  # 아래에서 모드에 따라 확정
         financial_assets=assets, investment_return=invest, inflation_rate=inflation,
         investment_volatility=volatility,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
@@ -340,6 +346,17 @@ def build_inputs():
                                  property_basic_deduction=basic_prop_ded),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
+
+    # 기초연금 처리 확정: 자동 판정이면 소득인정액으로 대상 여부를 계산해 반영/제외.
+    if basic_mode == "auto":
+        _, _, elig = estimate_basic_eligibility(user, cfg)
+        user.basic_pension_eligible = elig
+    elif basic_mode == "on":
+        user.basic_pension_eligible = True
+    else:  # "off"
+        user.basic_pension_eligible = False
+    user.basic_pension_mode = basic_mode  # 결과 화면 안내용(모드 저장)
+
     return user, cfg
 
 
@@ -448,19 +465,23 @@ def main():
     st.success(f"총 {R['n']:,}개 조합 평가 완료 "
                f"(물가 {', '.join(f'{x*100:.0f}%' for x in cfg.optimizer.robust_inflations)} 스트레스 반영).")
 
-    # 기초연금 대상 자동판정(소득인정액 근사).
-    ir, crit, elig = estimate_basic_eligibility(user, cfg)
-    if elig:
-        st.info(f"🟢 **기초연금 자동판정**: 소득인정액 ≈ {ir/1e4:,.0f}만원 ≤ 부부기준 {crit/1e4:,.0f}만원 "
-                f"→ **수급 대상 가능**." +
-                ("" if user.basic_pension_eligible
-                 else " (현재 '기초연금 수급 대상' 체크가 꺼져 있어 미반영 — 켜면 반영됩니다.)"))
-    else:
-        st.warning(f"🔴 **기초연금 자동판정**: 소득인정액 ≈ {ir/1e4:,.0f}만원 > 부부기준 {crit/1e4:,.0f}만원 "
-                   f"→ **대상이 아닐 가능성**(자산·연금이 기준 초과)." +
-                   (" 사이드바 '기초연금 수급 대상' 체크를 **꺼주세요**(현재 켜져 있어 과대평가됨)."
-                    if user.basic_pension_eligible else " (현재 체크 꺼짐 — 정상 반영)."))
-        st.caption("소득인정액=공적연금소득+재산환산. 재산공제·환산율은 근사이며 고급 설정에서 조정 가능합니다.")
+    # 기초연금 자동판정 결과 안내(소득인정액 근사).
+    ir, crit, elig = estimate_basic_eligibility(user, cfg)   # 대상 자격 여부
+    applied = user.basic_pension_eligible                    # 실제 반영 여부(모드 반영됨)
+    mode = getattr(user, "basic_pension_mode", "auto")
+    judge = (f"소득인정액 ≈ **{ir/1e4:,.0f}만원** vs 부부기준 {crit/1e4:,.0f}만원 → "
+             f"{'대상 가능 🟢' if elig else '대상 아님 🔴'}")
+    if mode == "auto":
+        if elig and applied:
+            st.info(f"기초연금 **자동판정: 수급 반영**. {judge}")
+        else:
+            st.warning(f"기초연금 **자동판정: 미수급(제외)**. {judge} — 자산·연금이 기준을 넘어 자동 제외했습니다.")
+    elif mode == "on":
+        st.info(f"기초연금 **수동 '수급'**{'(자격도 충족)' if elig else ' ⚠️(자격 미충족인데 강제 반영 — 과대평가 주의)'}. {judge}")
+    else:  # off
+        st.info(f"기초연금 **수동 '미수급'**{' (자격은 충족하나 제외됨)' if elig else ' (자격도 미충족)'}. {judge}")
+    st.caption("소득인정액=공적연금소득+재산환산(주택·금융). 재산공제·선정기준액은 근사이며 고급 설정에서 조정 가능. "
+               "정확한 확인은 복지로(bokjiro.go.kr) 모의계산 권장.")
 
     # 2) 3가지 관점 상위 5개 -------------------------------------------------
     st.header("🏆 성향별 추천 전략 (상위 5)")
