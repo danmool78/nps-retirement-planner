@@ -107,15 +107,15 @@ def generate_strategies(
 # ---------------------------------------------------------------------------
 def _worst_inflation_shortfall(user: UserInput, cfg: Config, strat: Strategy) -> float:
     """
-    한 전략을 여러 물가 스트레스 시나리오에서 돌려 '최악 물가에서의 부족액총합'을 반환.
-    물가는 예측 불가하므로, 어떤 물가가 와도 견디는지를 이 값으로 평가한다(로버스트).
+    '최악 물가에서의 부족액총합'을 반환(물가 예측 불가 대비 로버스트 지표).
+
+    생활비 부족액은 물가상승률이 높을수록 커진다(물가연동 연금보다 생활비·명목 주택연금
+    영향이 커서 사실상 단조 증가). 따라서 스트레스 물가 중 '가장 높은 값' 하나만 평가하면
+    최악값을 얻을 수 있어, 5회 시뮬레이션을 1회로 줄여 속도를 크게 개선한다.
     """
-    worst = 0.0
-    for infl in cfg.optimizer.robust_inflations:
-        stressed = Strategy(**{**strat.__dict__, "inflation_rate": infl})
-        sc = simulate(user, stressed, cfg)
-        worst = max(worst, sc.metrics["shortfall_total"])
-    return worst
+    worst_infl = max(cfg.optimizer.robust_inflations)
+    stressed = Strategy(**{**strat.__dict__, "inflation_rate": worst_infl})
+    return simulate(user, stressed, cfg, record=False).metrics["shortfall_total"]
 
 
 def evaluate_all(
@@ -129,10 +129,9 @@ def evaluate_all(
     'worst_infl_shortfall'(최악 물가 부족액) 컬럼을 추가한다.
     """
     records = []
-    scenarios: List[Scenario] = []
     for i, strat in enumerate(strategies):
-        sc = simulate(user, strat, cfg)
-        scenarios.append(sc)
+        # 지표만 계산(record=False): 월별 표를 만들지 않아 메모리를 크게 절약.
+        sc = simulate(user, strat, cfg, record=False)
         rec = {
             "id": i,
             "h_claim": strat.husband_claim_age,
@@ -150,9 +149,7 @@ def evaluate_all(
             rec["worst_infl_shortfall"] = _worst_inflation_shortfall(user, cfg, strat)
         records.append(rec)
 
-    df = pd.DataFrame(records)
-    df.attrs["scenarios"] = scenarios  # 시나리오 객체를 DataFrame 에 부착(그래프에서 재사용)
-    return df
+    return pd.DataFrame(records)
 
 
 def inflation_safety_margin(user: UserInput, cfg: Config, strat: Strategy) -> Optional[float]:
@@ -168,7 +165,7 @@ def inflation_safety_margin(user: UserInput, cfg: Config, strat: Strategy) -> Op
     infl = 0.0
     while infl <= cfgo.margin_max_inflation + 1e-9:
         stressed = Strategy(**{**strat.__dict__, "inflation_rate": infl})
-        sc = simulate(user, stressed, cfg)
+        sc = simulate(user, stressed, cfg, record=False)
         if sc.metrics["shortfall_total"] <= 0:
             last_safe = infl
         else:
@@ -409,7 +406,7 @@ def shortfall_by_housing_age(user: UserInput, cfg: Config) -> pd.DataFrame:
             husband_life=base.husband_life,
             wife_life=base.wife_life,
         )
-        sc = simulate(user, strat, cfg)
+        sc = simulate(user, strat, cfg, record=False)
         rows.append({"housing_age": age, "shortfall_total": sc.metrics["shortfall_total"]})
     return pd.DataFrame(rows)
 
@@ -425,7 +422,7 @@ def shortfall_by_inflation(user: UserInput, cfg: Config) -> pd.DataFrame:
     rows = []
     for infl in cfg.optimizer.inflation_scenarios:
         strat = Strategy(**{**base.__dict__, "inflation_rate": infl})
-        sc = simulate(user, strat, cfg)
+        sc = simulate(user, strat, cfg, record=False)
         rows.append({"inflation": infl, "shortfall_total": sc.metrics["shortfall_total"]})
     return pd.DataFrame(rows)
 
@@ -435,10 +432,14 @@ def best_strategy_by_life(user: UserInput, cfg: Config, view: str = "stable") ->
     기대수명 시나리오별로 최적 전략을 찾아 비교.
     그래프7(기대수명별 유리한 전략)용.
     """
+    # 속도: 기대수명 민감도는 '수령나이' 중심 비교이므로 주택연금 개시나이는 대표 1개로 고정해
+    # 조합 수를 줄인다(전체 격자 탐색은 메인 결과에서 이미 수행).
+    rep_house = [max(cfg.housing.min_start_age, user.retirement_age)]
     rows = []
     for life in cfg.optimizer.life_expectancy_scenarios:
         # 부부 기대수명을 동일 시나리오로 두고(간이) 탐색.
-        strategies = generate_strategies(user, cfg, husband_life=life, wife_life=life + 4)
+        strategies = generate_strategies(user, cfg, housing_ages=rep_house,
+                                         husband_life=life, wife_life=life + 4)
         df = evaluate_all(user, cfg, strategies)
         df = score(df, cfg)
         best = df.sort_values(f"score_{view}", ascending=False).iloc[0]

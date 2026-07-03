@@ -81,13 +81,18 @@ def _person_base_pension(
 # ---------------------------------------------------------------------------
 # 메인 시뮬레이션
 # ---------------------------------------------------------------------------
-def simulate(user: UserInput, strat: Strategy, cfg: Config) -> Scenario:
+def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True) -> Scenario:
     """
     하나의 전략에 대해 월 단위 현금흐름을 시뮬레이션한다.
 
     타임라인
     - 기준: 남편 은퇴나이(user.retirement_age)를 month 0 으로 둔다.
     - 종료: 부부 중 나중에 사망하는 사람의 사망시점까지.
+
+    성능/메모리
+    - record=True  : 월별 상세 표(DataFrame)를 만들어 그래프에 사용(추천 시나리오 1개 등).
+    - record=False : 표를 만들지 않고 누적값으로 지표만 계산(수천 개 조합 탐색용).
+      수백~수천 조합을 평가할 때 DataFrame 생성을 생략해 메모리·속도를 크게 절약한다.
     """
     start_age_h = user.retirement_age
     start_age_w = _wife_age_at_start(user)
@@ -99,6 +104,8 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config) -> Scenario:
 
     # 월 이율.
     r_invest = monthly_rate(user.investment_return)
+    r_disc = monthly_rate(cfg.optimizer.discount_rate)
+    disc_base = 1.0 + r_disc
 
     # 부부 각자의 연금 계산 모듈/정책(국민연금 vs 교직원연금)을 미리 확정.
     h_mod, h_pol = pension.resolve(user.husband, cfg)
@@ -126,8 +133,17 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config) -> Scenario:
     if strat.use_voluntary:
         assets -= user.husband.voluntary_cost + user.wife.voluntary_cost
 
-    rows = []
+    # 누적 지표(표 없이 계산).
+    total_nominal = 0.0
+    total_pv = 0.0
+    shortfall_total = 0.0
+    shortfall_months = 0
+    worst_shortfall = 0.0
+    survivor_min_net = 0.0
+    has_single = False
     depletion_age: Optional[float] = None
+
+    rows = [] if record else None
 
     for m in range(total_months):
         year_idx = m // 12  # 시작 후 경과 연차(물가연동/성장 계산용)
@@ -139,16 +155,14 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config) -> Scenario:
         w_alive = m < w_end_month
 
         # --- 1) 연금 수입 계산 ---
-        income = 0.0
-
-        # 남편 연금(국민연금 또는 교직원연금)
+        # 남편 연금
         h_pension = 0.0
         if h_alive and h_age >= strat.husband_claim_age:
             years_since = int(h_age - strat.husband_claim_age)
             h_pension = h_mod.indexed_monthly_pension(
                 h_base, years_since, strat.inflation_rate, h_pol
             )
-        # 아내 연금(국민연금 또는 교직원연금)
+        # 아내 연금
         w_pension = 0.0
         if w_alive and w_age >= strat.wife_claim_age:
             years_since = int(w_age - strat.wife_claim_age)
@@ -157,8 +171,6 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config) -> Scenario:
             )
 
         # --- 2) 유족연금(한쪽 사망 시) ---
-        # 배우자 사망 시 생존자는 본인연금 + 사망자연금×유족지급률(중복조정 근사)을 받는다.
-        # 유족지급률은 '사망자의 연금 제도' 기준을 적용한다.
         survivor_extra = 0.0
         if h_alive and not w_alive and w_base > 0:
             years_since = int(w_age - strat.wife_claim_age) if w_age >= strat.wife_claim_age else 0
@@ -199,80 +211,48 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config) -> Scenario:
             if depletion_age is None:
                 depletion_age = round(h_age, 1)
 
-        rows.append(
-            {
+        # --- 지표 누적 ---
+        pension_income = h_pension + w_pension + survivor_extra + house_income
+        total_nominal += pension_income
+        total_pv += pension_income * (disc_base ** (-m))
+        if shortfall > 0:
+            shortfall_total += shortfall
+            shortfall_months += 1
+            if shortfall > worst_shortfall:
+                worst_shortfall = shortfall
+        if not both_alive:
+            if not has_single or net < survivor_min_net:
+                survivor_min_net = net
+                has_single = True
+
+        if record:
+            rows.append({
                 "month": m,
-                "husband_age": round(h_age, 2),
-                "wife_age": round(w_age, 2),
-                "h_pension": h_pension,
-                "w_pension": w_pension,
-                "survivor_pension": survivor_extra,
-                "house_income": house_income,
-                "income": income,
-                "expense": expense,
-                "net": net,
-                "assets": assets,
-                "shortfall": shortfall,
-                "both_alive": both_alive,
-            }
-        )
-
-    frame = pd.DataFrame(rows)
-    metrics = _compute_metrics(user, strat, cfg, frame, assets)
-    return Scenario(strategy=strat, frame=frame, metrics=metrics)
-
-
-def _compute_metrics(
-    user: UserInput, strat: Strategy, cfg: Config, frame: pd.DataFrame, final_assets: float
-) -> dict:
-    """월별 표로부터 요약 지표를 산출."""
-    if frame.empty:
-        return {}
-
-    r_disc = monthly_rate(cfg.optimizer.discount_rate)
-
-    # 총 연금수령액(명목): 국민연금+유족연금+주택연금.
-    pension_series = frame["h_pension"] + frame["w_pension"] + frame["survivor_pension"] + frame["house_income"]
-    total_nominal = float(pension_series.sum())
-
-    # 현재가치 총수령액: 각 월 수령액을 할인율로 현재가치화.
-    disc_factors = [(1.0 + r_disc) ** (-m) for m in frame["month"]]
-    total_pv = float((pension_series.values * disc_factors).sum())
-
-    # 부족액 관련 지표.
-    shortfall = frame["shortfall"]
-    shortfall_total = float(shortfall.sum())
-    shortfall_months = int((shortfall > 0).sum())
-    worst_shortfall = float(shortfall.max())
-
-    # 자산 고갈 시점(남편 나이). 부족이 한 번도 없으면 None.
-    depl = frame.loc[frame["shortfall"] > 0, "husband_age"]
-    depletion_age = float(depl.iloc[0]) if not depl.empty else None
+                "husband_age": round(h_age, 2), "wife_age": round(w_age, 2),
+                "h_pension": h_pension, "w_pension": w_pension,
+                "survivor_pension": survivor_extra, "house_income": house_income,
+                "income": income, "expense": expense, "net": net,
+                "assets": assets, "shortfall": shortfall, "both_alive": both_alive,
+            })
 
     # 사망시점 예상 잔여자산(=최종 금융자산 + 주택가치).
     # 주택연금을 쓰면 주택은 대출상환에 소진된다고 가정하여 상속가치에서 제외.
-    sim_years = len(frame) // 12
-    if strat.use_housing:
-        house_bequest = 0.0
-    else:
-        house_bequest = hp.house_value_at(user.house_value, sim_years, cfg.housing)
-    bequest = float(final_assets + house_bequest)
+    sim_years = total_months // 12
+    house_bequest = 0.0 if strat.use_housing else hp.house_value_at(user.house_value, sim_years, cfg.housing)
 
-    # 배우자 단독 생존 구간의 최소 순현금흐름(단독 생존 리스크 지표).
-    single_rows = frame[~frame["both_alive"]]
-    survivor_min_net = float(single_rows["net"].min()) if not single_rows.empty else 0.0
-
-    return {
+    metrics = {
         "total_nominal": total_nominal,
         "total_pv": total_pv,
         "shortfall_total": shortfall_total,
         "shortfall_months": shortfall_months,
         "worst_shortfall": worst_shortfall,
         "depletion_age": depletion_age,
-        "bequest": bequest,
+        "bequest": assets + house_bequest,
         "survivor_min_net": survivor_min_net,
-        "final_assets": float(final_assets),
+        "final_assets": assets,
     }
+    frame = pd.DataFrame(rows) if record else pd.DataFrame()
+    return Scenario(strategy=strat, frame=frame, metrics=metrics)
 
 
 def build_strategy_from_user(user: UserInput, cfg: Config) -> Strategy:

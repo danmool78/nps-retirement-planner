@@ -114,6 +114,37 @@ def guide(key: str):
 
 
 # ---------------------------------------------------------------------------
+# 무거운 계산은 캐싱하여 위젯 조작 시 재계산을 방지(메모리·속도 절약)
+# UserInput/Config 는 dataclass 이므로 repr 로 해시 키를 만든다.
+# ---------------------------------------------------------------------------
+@st.cache_data(hash_funcs={UserInput: repr, Config: repr}, show_spinner=False, max_entries=2)
+def compute_pipeline(user: UserInput, cfg: Config) -> dict:
+    """전 조합 평가·점수·파레토·민감도·추천 시나리오를 한 번에 계산하고 캐싱한다."""
+    strategies = opt.generate_strategies(user, cfg)
+    df = opt.score(opt.evaluate_all(user, cfg, strategies, robust=True), cfg)
+    pareto = opt.pareto_front(df)
+
+    tops = {v: opt.top_n(df, v, 5) for v in ("stable", "maximize", "bequest")}
+    best_id = int(tops["stable"].iloc[0]["id"])
+    best_strat = strategies[best_id]
+
+    return {
+        "n": len(df),
+        "df": df,
+        "pareto": pareto,
+        "tops": tops,
+        "best_id": best_id,
+        "best_scenario": simulate(user, best_strat, cfg, record=True),
+        "margin": opt.inflation_safety_margin(user, cfg, best_strat),
+        "life_df": opt.best_strategy_by_life(user, cfg, "stable"),
+        "housing_df": opt.shortfall_by_housing_age(user, cfg) if user.use_housing_pension else None,
+        "inflation_df": opt.shortfall_by_inflation(user, cfg),
+        "husband_curves": opt.cumulative_receipts_curves(user, cfg, "husband"),
+        "wife_curves": opt.cumulative_receipts_curves(user, cfg, "wife"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # 사이드바 입력 → UserInput / Config
 # ---------------------------------------------------------------------------
 def build_inputs():
@@ -217,10 +248,9 @@ def build_inputs():
 # ---------------------------------------------------------------------------
 # 결과 렌더링
 # ---------------------------------------------------------------------------
-def render_view(df, view: str, title: str):
-    """한 관점의 상위 5개 조합 표 + 자동 장단점 설명."""
+def render_view_table(top, view: str, df, title: str):
+    """미리 계산된 상위 5개 조합 표 + 자동 장단점 설명을 렌더링."""
     st.subheader(title)
-    top = opt.top_n(df, view, 5)
     for _, row in top.iterrows():
         housing_txt = f"{int(row['housing'])}세" if row["use_housing"] else "미사용"
         cols = st.columns([1, 3])
@@ -235,7 +265,6 @@ def render_view(df, view: str, title: str):
                 f"상속 {row['bequest']/1e8:.2f}억"
             )
             st.caption(opt.explain(row, df))
-    return top
 
 
 def main():
@@ -244,7 +273,11 @@ def main():
 
     user, cfg = build_inputs()
 
-    if not st.sidebar.button("🚀 시뮬레이션 실행", type="primary"):
+    # 실행 버튼을 누른 적이 있으면 세션에 기록 → 이후 위젯 조작에도 결과가 유지되도록 함.
+    if st.sidebar.button("🚀 시뮬레이션 실행", type="primary"):
+        st.session_state["ran"] = True
+
+    if not st.session_state.get("ran"):
         st.info("좌측에서 값을 입력하고 **시뮬레이션 실행**을 눌러주세요.")
         h_normal = pension.normal_start_age(user.husband, cfg)
         w_normal = pension.normal_start_age(user.wife, cfg)
@@ -255,37 +288,30 @@ def main():
         )
         return
 
-    # 1) 조합 전수 평가 + 점수화 --------------------------------------------
-    # robust=True: 각 전략을 여러 물가에서 돌려 '최악 물가 부족액'까지 평가(물가 예측 불가 대비).
+    # 1) 무거운 계산은 캐싱된 파이프라인으로(입력이 같으면 위젯 조작 시 재계산 안 함).
     with st.spinner("조합을 계산 중입니다(물가 스트레스 포함)..."):
-        strategies = opt.generate_strategies(user, cfg)
-        df = opt.evaluate_all(user, cfg, strategies, robust=True)
-        df = opt.score(df, cfg)
-        pareto = opt.pareto_front(df)
+        R = compute_pipeline(user, cfg)
+    df, pareto, tops = R["df"], R["pareto"], R["tops"]
+    best_row = tops["stable"].iloc[0]
+    best_scenario = R["best_scenario"]
 
-    st.success(f"총 {len(df):,}개 조합 평가 완료 "
+    st.success(f"총 {R['n']:,}개 조합 평가 완료 "
                f"(물가 {', '.join(f'{x*100:.0f}%' for x in cfg.optimizer.robust_inflations)} 스트레스 반영).")
 
     # 2) 3가지 관점 상위 5개 -------------------------------------------------
     st.header("🏆 성향별 추천 전략 (상위 5)")
     guide("views")
     tabs = st.tabs(["🛡️ 안정형", "📈 총수령액 극대화형", "🎁 상속중시형"])
-    tops = {}
     with tabs[0]:
-        tops["stable"] = render_view(df, "stable", "생활비 부족을 최소화하는 안정형 상위 5")
+        render_view_table(tops["stable"], "stable", df, "생활비 부족을 최소화하는 안정형 상위 5")
     with tabs[1]:
-        tops["maximize"] = render_view(df, "maximize", "총수령액을 극대화하는 상위 5")
+        render_view_table(tops["maximize"], "maximize", df, "총수령액을 극대화하는 상위 5")
     with tabs[2]:
-        tops["bequest"] = render_view(df, "bequest", "상속(잔여자산)을 중시하는 상위 5")
-
-    # 대표 추천(안정형 1위)을 상세 그래프 대상 시나리오로 사용.
-    best_row = tops["stable"].iloc[0]
-    best_strat = strategies[int(best_row["id"])]
-    best_scenario = simulate(user, best_strat, cfg)
+        render_view_table(tops["bequest"], "bequest", df, "상속(잔여자산)을 중시하는 상위 5")
 
     # 물가 안전 마진: 추천(안정형 1위) 전략이 부족 없이 견디는 최대 물가상승률.
     st.subheader("🌡️ 추천 전략의 물가 안전 마진")
-    margin = opt.inflation_safety_margin(user, cfg, best_strat)
+    margin = R["margin"]
     m1, m2, m3 = st.columns(3)
     if margin is None:
         m1.metric("물가 안전 마진", "0% 미만", "현재 가정에서도 부족 발생")
@@ -318,14 +344,14 @@ def main():
     g3, g3b = st.columns(2)
     with g3:
         h_lbl = f"남편·{pension.type_label(user.husband)}"
-        h_curves, h_prin, h_be, h_death, h_reps = opt.cumulative_receipts_curves(user, cfg, "husband")
+        h_curves, h_prin, h_be, h_death, h_reps = R["husband_curves"]
         st.plotly_chart(
             viz.fig_cumulative_receipts(h_curves, h_prin, h_be, h_death, h_reps, h_lbl),
             use_container_width=True)
         guide("receipts")
     with g3b:
         w_lbl = f"아내·{pension.type_label(user.wife)}"
-        w_curves, w_prin, w_be, w_death, w_reps = opt.cumulative_receipts_curves(user, cfg, "wife")
+        w_curves, w_prin, w_be, w_death, w_reps = R["wife_curves"]
         st.plotly_chart(
             viz.fig_cumulative_receipts(w_curves, w_prin, w_be, w_death, w_reps, w_lbl),
             use_container_width=True)
@@ -333,9 +359,8 @@ def main():
 
     g4, g5 = st.columns(2)
     with g4:
-        if user.use_housing_pension:
-            hdf = opt.shortfall_by_housing_age(user, cfg)
-            st.plotly_chart(viz.fig_shortfall_by_housing(hdf), use_container_width=True)
+        if R["housing_df"] is not None:
+            st.plotly_chart(viz.fig_shortfall_by_housing(R["housing_df"]), use_container_width=True)
             guide("housing")
         else:
             st.info("주택연금 미사용 — ④ 그래프 생략")
@@ -345,19 +370,16 @@ def main():
 
     g6, g7 = st.columns(2)
     with g6:
-        idf = opt.shortfall_by_inflation(user, cfg)
-        st.plotly_chart(viz.fig_shortfall_by_inflation(idf), use_container_width=True)
+        st.plotly_chart(viz.fig_shortfall_by_inflation(R["inflation_df"]), use_container_width=True)
         guide("inflation")
     with g7:
-        with st.spinner("기대수명별 최적 전략 탐색..."):
-            ldf = opt.best_strategy_by_life(user, cfg, "stable")
-        st.plotly_chart(viz.fig_best_by_life(ldf), use_container_width=True)
+        st.plotly_chart(viz.fig_best_by_life(R["life_df"]), use_container_width=True)
         guide("life")
 
     g8, g9 = st.columns(2)
     with g8:
         st.plotly_chart(
-            viz.fig_pareto(df, pareto, best_id=int(best_row["id"])),
+            viz.fig_pareto(df, pareto, best_id=R["best_id"]),
             use_container_width=True,
         )
         guide("pareto")
