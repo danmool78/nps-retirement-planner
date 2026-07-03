@@ -74,9 +74,13 @@ body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#222;
 h1{border-bottom:3px solid #2E86DE;padding-bottom:8px;font-size:22px;}
 h2{margin-top:22px;color:#1A5276;border-left:5px solid #2E86DE;padding-left:8px;font-size:17px;}
 h3{font-size:14px;margin:12px 0 4px;}
-table{border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;}
-th,td{border:1px solid #ccc;padding:5px 7px;text-align:center;}
+table{border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;max-width:100%;}
+th,td{border:1px solid #ccc;padding:5px 7px;text-align:center;
+      overflow-wrap:anywhere;word-break:break-word;white-space:normal;}  /* 긴 값 자동 줄바꿈 */
 th{background:#EBF5FB;}
+/* 입력요약 표: 라벨 30% / 값 70% 로 폭 배분 */
+.kv td,.kv th{text-align:left;}
+.kv th{width:30%;}
 .meta{color:#555;font-size:12px;}
 .chart{width:100%;margin:6px 0 18px;page-break-inside:avoid;}
 @media print{
@@ -118,10 +122,9 @@ def build_html_report(figs, tops: dict, summary: dict) -> bytes:
              f"평가 조합 수: {summary.get('n_combos', 0):,}개 · {summary.get('normal_ages','')}</p>"]
 
     # 입력 요약
-    parts.append("<h2>📋 입력 요약</h2><table>")
+    parts.append("<h2>📋 입력 요약</h2><table class='kv'>")
     for label, value in summary.get("inputs", []):
-        parts.append(f"<tr><th style='text-align:left;width:220px'>{label}</th>"
-                     f"<td style='text-align:left'>{value}</td></tr>")
+        parts.append(f"<tr><th>{label}</th><td>{value}</td></tr>")
     parts.append("</table>")
 
     # 물가 안전 마진
