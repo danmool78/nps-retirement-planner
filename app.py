@@ -408,8 +408,11 @@ def main():
                                            key="scatterview")]
         # 별표는 '선택한 관점'의 1위 조합을 가리키도록(색 기준과 일치).
         sview_best = int(tops[sview].iloc[0]["id"])
-        st.plotly_chart(viz.fig_score_scatter(df, sview, best_id=sview_best),
-                        use_container_width=True)
+        try:
+            st.plotly_chart(viz.fig_score_scatter(df, sview, best_id=sview_best),
+                            use_container_width=True)
+        except Exception as e:  # 산점도 렌더 실패가 전체 앱을 멈추지 않도록.
+            st.warning(f"산점도를 그리는 중 문제가 발생해 건너뜁니다: {e}")
         guide("scatter")
 
     # 4) 내보내기 ------------------------------------------------------------
