@@ -299,6 +299,6 @@ def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
                            font=dict(size=12, color="#B7950B"),
                            bgcolor="rgba(255,255,255,0.7)")
 
-    fig.update_layout(title=f"조합별 점수 산점도 ({view})",
+    fig.update_layout(title=f"⑨ 조합별 점수 산점도 ({view})",
                       xaxis_title="총수령액 현재가치(만원)", yaxis_title="잔여자산(만원)")
     return fig
