@@ -109,6 +109,15 @@ GRAPH_GUIDES = {
 - **👍/👎** = 다른 조합 대비 자동으로 뽑은 장단점.
 - 맨 위(1위)가 그 관점의 추천안이며, 아래 그래프는 **안정형 1위**를 기준으로 그려집니다.
 """,
+    "breakdown": """
+**월수입 구성표 읽는 법** — 추천 전략에서 나이별로 매달 실제 손에 쥐는 돈의 구성.
+- **공적연금(세전)** = 국민·교직원·공무원+유족연금 합(세금 떼기 전).
+- **− 세금·건보** = 연금소득세+건강보험료로 빠지는 금액.
+- **실수령 연금** = 세전에서 세금·건보를 뺀 실제 받는 연금.
+- **+ 기초연금** = 65세부터 추가(부부 동시 수급 시 각 감액).
+- **+ 주택연금** = 주택연금 월지급액(비과세).
+- **= 월 실수령 합계** = 그 나이에 매달 실제 들어오는 총액. 생활비와 비교하면 됩니다.
+""",
     "montecarlo": """
 **투자 변동성 스트레스(몬테카를로)** — 수익률을 매년 무작위로 흔들어 수백 번 시뮬레이션.
 - **성공확률** = 부족 없이 끝까지 버틴 경로 비율. 높을수록 안전(보통 80%+ 목표).
@@ -345,6 +354,32 @@ def render_view_table(top, view: str, df, title: str):
             st.caption(opt.explain(row, df))
 
 
+def income_breakdown_table(frame, ages=(65, 70, 75, 80)):
+    """
+    추천 시나리오의 '월수입 구성'을 나이별로 분해한 표(DataFrame)를 만든다.
+    항목: 공적연금(세전) → −세금·건보 → 실수령 연금 → +기초연금 → +주택연금 → =월 실수령 합계.
+    """
+    import pandas as pd
+    if frame.empty:
+        return None
+    lo, hi = frame["husband_age"].min(), frame["husband_age"].max()
+    cols = {}
+    for age in ages:
+        if age < lo - 0.5 or age > hi:
+            continue
+        row = frame.iloc[(frame["husband_age"] - age).abs().idxmin()]
+        gross = row["h_pension"] + row["w_pension"] + row["survivor_pension"]  # 세전 공적연금
+        tax = gross - row["net_taxable"]                                       # 세금·건보 차감액
+        vals = [gross, -tax, row["net_taxable"],
+                row["basic_pension"], row["house_income"], row["income"]]
+        cols[f"{age}세"] = [f"{v:,.0f}원" for v in vals]  # 문자열로 미리 포맷(applymap 회피)
+    if not cols:
+        return None
+    idx = ["공적연금(세전)", "− 세금·건보", "실수령 연금",
+           "+ 기초연금", "+ 주택연금", "= 월 실수령 합계"]
+    return pd.DataFrame(cols, index=idx)
+
+
 def main():
     st.title("부부 노후자금 통합 시뮬레이터")
     st.caption("국민연금·교직원연금·공무원연금·주택연금·추납·임의가입·물가·기대수명을 통합해 월 단위 현금흐름을 시뮬레이션합니다.")
@@ -395,6 +430,15 @@ def main():
         render_view_table(tops["maximize"], "maximize", df, "총수령액을 극대화하는 상위 5")
     with tabs[2]:
         render_view_table(tops["bequest"], "bequest", df, "상속(잔여자산)을 중시하는 상위 5")
+
+    # 추천 전략 월수입 구성(세전 → 세금·건보 → 기초연금 → 실수령).
+    st.subheader("추천 전략 월수입 구성 (실수령 확인)")
+    bd = income_breakdown_table(best_scenario.frame)
+    if bd is not None:
+        st.table(bd)
+        st.caption("세전 공적연금에서 **세금·건강보험료를 빼고**, 65세부터 **기초연금**을 더한 "
+                   "월 실수령을 나이별로 보여줍니다. (물가상승 반영된 명목 금액)")
+    guide("breakdown")
 
     # 물가 안전 마진: 추천(안정형 1위) 전략이 부족 없이 견디는 최대 물가상승률.
     st.subheader("🌡️ 추천 전략의 물가 안전 마진")
