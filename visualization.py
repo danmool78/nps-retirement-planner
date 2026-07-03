@@ -55,16 +55,37 @@ def fig_cumulative_assets(sc: Scenario) -> go.Figure:
     return fig
 
 
-# 3) 국민연금 수령시점별 총수령액 -------------------------------------------
+# 3) 연금 수령시점별 총수령액 + 납입원금/원금확보 시점 -----------------------
 def fig_nps_by_claim_age(df: pd.DataFrame, label: str = "남편") -> go.Figure:
-    """수령개시나이별 명목 총수령액(막대) + 개시시점 월액(선)."""
+    """
+    수령개시나이별 명목 총수령액(막대) + 개시시점 월액(선).
+    추가로 '납입원금' 수평선과 각 막대 위 '원금확보 나이'를 표시하여
+    언제부터 받으면 몇 세에 원금을 회수하는지 함께 보여준다.
+    """
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df["claim_age"], y=df["total_nominal"] / _MAN,
                          name="명목 총수령액", marker_color="#2E86DE"))
     fig.add_trace(go.Scatter(x=df["claim_age"], y=df["monthly"] / _MAN,
                              name="개시 월수령액", yaxis="y2", line=dict(color="#E67E22")))
+
+    # 납입원금(입력이 있을 때만) 수평 기준선 + 원금확보 나이 주석.
+    principal = float(df["principal"].iloc[0]) if "principal" in df and len(df) else 0.0
+    if principal > 0:
+        fig.add_hline(
+            y=principal / _MAN, line_dash="dash", line_color="#C0392B",
+            annotation_text=f"납입원금 {principal/_MAN:,.0f}만원",
+            annotation_position="top left",
+        )
+        # 각 개시나이 막대 위에 '원금확보 XX세' 표시(회수 못하면 '미회수').
+        for _, r in df.iterrows():
+            be = r.get("breakeven_age")
+            txt = f"원금확보<br>{int(be)}세" if be and not pd.isna(be) else "원금<br>미회수"
+            fig.add_annotation(x=r["claim_age"], y=(r["total_nominal"] / _MAN),
+                               text=txt, showarrow=False, yshift=14,
+                               font=dict(size=9, color="#C0392B"))
+
     fig.update_layout(
-        title=f"③ 국민연금 수령시점별 총수령액 비교 ({label})",
+        title=f"③ 연금 수령시점별 총수령액·원금확보 시점 ({label})",
         xaxis_title="수령개시나이",
         yaxis=dict(title="총수령액(만원)"),
         yaxis2=dict(title="월수령액(만원)", overlaying="y", side="right"),

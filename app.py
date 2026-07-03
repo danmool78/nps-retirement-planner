@@ -18,12 +18,13 @@ from __future__ import annotations
 import streamlit as st
 
 import nps
+import pension
 import optimizer as opt
 import visualization as viz
 import export
 from cashflow import simulate, build_strategy_from_user
 from config import (
-    Config, NpsPolicy, HousingPolicy, OptimizerConfig,
+    Config, NpsPolicy, TeacherPolicy, HousingPolicy, OptimizerConfig,
     Person, UserInput,
 )
 
@@ -37,21 +38,36 @@ def build_inputs():
     """사이드바 위젯을 그려 UserInput 과 Config 를 반환."""
     st.sidebar.header("👫 부부 기본정보")
 
+    # 연금 종류 라벨 <-> 내부 코드 매핑.
+    PENSION_TYPES = {"국민연금": "nps", "교직원연금(사학연금)": "teacher"}
+
     c1, c2 = st.sidebar.columns(2)
     with c1:
         st.caption("남편")
+        h_ptype = PENSION_TYPES[st.selectbox("남편 연금종류", list(PENSION_TYPES), key="hpt")]
         h_birth = st.number_input("남편 출생연도", 1940, 2000, 1965, key="hb")
-        h_nps = st.number_input("남편 국민연금 월액(원)", 0, 5_000_000, 1_100_000, 50_000, key="hn")
+        h_nps = st.number_input("남편 연금 월액(원)", 0, 5_000_000, 1_100_000, 50_000, key="hn")
+        h_principal = st.number_input("남편 총 납입원금(원)", 0, 1_000_000_000,
+                                      100_000_000, 5_000_000, key="hpp")
         h_life = st.number_input("남편 기대수명", 70, 110, 86, key="hl")
-        h_chunap_y = st.number_input("남편 추납기간(년)", 0, 20, 0, key="hcy")
-        h_chunap_c = st.number_input("남편 추납비용(원)", 0, 200_000_000, 0, 1_000_000, key="hcc")
+        # 추납/임의가입은 국민연금 전용 → 교직원연금이면 비활성화.
+        h_teacher = h_ptype == "teacher"
+        h_chunap_y = st.number_input("남편 추납기간(년)", 0, 20, 0, key="hcy", disabled=h_teacher)
+        h_chunap_c = st.number_input("남편 추납비용(원)", 0, 200_000_000, 0, 1_000_000,
+                                     key="hcc", disabled=h_teacher)
     with c2:
         st.caption("아내")
+        w_ptype = PENSION_TYPES[st.selectbox("아내 연금종류", list(PENSION_TYPES),
+                                             index=0, key="wpt")]
         w_birth = st.number_input("아내 출생연도", 1940, 2000, 1967, key="wb")
-        w_nps = st.number_input("아내 국민연금 월액(원)", 0, 5_000_000, 700_000, 50_000, key="wn")
+        w_nps = st.number_input("아내 연금 월액(원)", 0, 5_000_000, 700_000, 50_000, key="wn")
+        w_principal = st.number_input("아내 총 납입원금(원)", 0, 1_000_000_000,
+                                      80_000_000, 5_000_000, key="wpp")
         w_life = st.number_input("아내 기대수명", 70, 110, 90, key="wl")
-        w_chunap_y = st.number_input("아내 추납기간(년)", 0, 20, 0, key="wcy")
-        w_chunap_c = st.number_input("아내 추납비용(원)", 0, 200_000_000, 0, 1_000_000, key="wcc")
+        w_teacher = w_ptype == "teacher"
+        w_chunap_y = st.number_input("아내 추납기간(년)", 0, 20, 0, key="wcy", disabled=w_teacher)
+        w_chunap_c = st.number_input("아내 추납비용(원)", 0, 200_000_000, 0, 1_000_000,
+                                     key="wcc", disabled=w_teacher)
 
     st.sidebar.header("💰 생활/자산")
     retire_age = st.sidebar.number_input("은퇴나이(남편 기준)", 50, 75, 60)
@@ -67,17 +83,22 @@ def build_inputs():
     house_monthly = st.sidebar.number_input("주택연금 기준월지급액(원)", 0, 10_000_000, 1_200_000, 50_000)
 
     st.sidebar.header("⚙️ 제도 파라미터(고급)")
-    with st.sidebar.expander("감액/가산/계수 조정"):
+    with st.sidebar.expander("국민연금 감액/가산/계수"):
         early = st.number_input("조기수령 월감액률(%)", 0.0, 2.0, 0.5, 0.05) / 100
         defer = st.number_input("연기수령 월가산률(%)", 0.0, 2.0, 0.6, 0.05) / 100
-        surv = st.number_input("유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0) / 100
+        surv = st.number_input("국민 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0) / 100
         house_factor = st.number_input("주택연금 나이계수(1세당,%)", 0.0, 20.0, 6.0, 0.5) / 100
         discount = st.number_input("현재가치 할인율(%)", 0.0, 10.0, 2.0, 0.5) / 100
+    with st.sidebar.expander("교직원연금(사학연금) 파라미터"):
+        t_early = st.number_input("조기퇴직연금 연감액률(%)", 0.0, 10.0, 5.0, 0.5) / 100
+        t_surv = st.number_input("교직원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0) / 100
 
     # --- 객체 조립 ---
-    husband = Person("남편", h_birth, nps_monthly=h_nps,
+    husband = Person("남편", h_birth, nps_monthly=h_nps, pension_type=h_ptype,
+                     paid_principal=h_principal,
                      chunap_years=h_chunap_y, chunap_cost=h_chunap_c)
-    wife = Person("아내", w_birth, nps_monthly=w_nps,
+    wife = Person("아내", w_birth, nps_monthly=w_nps, pension_type=w_ptype,
+                  paid_principal=w_principal,
                   chunap_years=w_chunap_y, chunap_cost=w_chunap_c)
 
     user = UserInput(
@@ -92,6 +113,7 @@ def build_inputs():
     cfg = Config(
         nps=NpsPolicy(early_monthly_reduction=early, defer_monthly_increase=defer,
                       survivor_pension_rate=surv),
+        teacher=TeacherPolicy(early_yearly_reduction=t_early, survivor_pension_rate=t_surv),
         housing=HousingPolicy(age_factor_per_year=house_factor),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
@@ -109,7 +131,7 @@ def render_view(df, view: str, title: str):
         housing_txt = f"{int(row['housing'])}세" if row["use_housing"] else "미사용"
         cols = st.columns([1, 3])
         with cols[0]:
-            st.metric(f"국민 {int(row['h_claim'])}/{int(row['w_claim'])}세",
+            st.metric(f"연금 {int(row['h_claim'])}/{int(row['w_claim'])}세",
                       f"{row[f'score_{view}']:.3f} 점")
         with cols[1]:
             st.write(
@@ -124,15 +146,19 @@ def render_view(df, view: str, title: str):
 
 def main():
     st.title("👴👵 부부 노후자금 통합 시뮬레이터")
-    st.caption("국민연금·주택연금·추납·임의가입·물가·기대수명을 통합해 월 단위 현금흐름을 시뮬레이션합니다.")
+    st.caption("국민연금·교직원연금·주택연금·추납·임의가입·물가·기대수명을 통합해 월 단위 현금흐름을 시뮬레이션합니다.")
 
     user, cfg = build_inputs()
 
     if not st.sidebar.button("🚀 시뮬레이션 실행", type="primary"):
         st.info("좌측에서 값을 입력하고 **시뮬레이션 실행**을 눌러주세요.")
-        h_normal = nps.normal_start_age(user.husband.birth_year, cfg.nps)
-        w_normal = nps.normal_start_age(user.wife.birth_year, cfg.nps)
-        st.write(f"참고: 정상 수령개시연령 — 남편 **{h_normal}세**, 아내 **{w_normal}세**")
+        h_normal = pension.normal_start_age(user.husband, cfg)
+        w_normal = pension.normal_start_age(user.wife, cfg)
+        st.write(
+            f"참고: 정상 수령개시연령 — "
+            f"남편({pension.type_label(user.husband)}) **{h_normal}세**, "
+            f"아내({pension.type_label(user.wife)}) **{w_normal}세**"
+        )
         return
 
     # 1) 조합 전수 평가 + 점수화 --------------------------------------------
@@ -167,36 +193,44 @@ def main():
     with g2:
         st.plotly_chart(viz.fig_cumulative_assets(best_scenario), use_container_width=True)
 
-    g3, g4 = st.columns(2)
+    # ③ 수령시점별 총수령액·원금확보 시점 — 남편/아내 각각(연금 제도 자동 반영).
+    g3, g3b = st.columns(2)
     with g3:
-        nps_df = opt.nps_receipts_by_claim_age(user, cfg, "husband")
-        st.plotly_chart(viz.fig_nps_by_claim_age(nps_df, "남편"), use_container_width=True)
+        h_lbl = f"남편·{pension.type_label(user.husband)}"
+        h_recv = opt.nps_receipts_by_claim_age(user, cfg, "husband")
+        st.plotly_chart(viz.fig_nps_by_claim_age(h_recv, h_lbl), use_container_width=True)
+    with g3b:
+        w_lbl = f"아내·{pension.type_label(user.wife)}"
+        w_recv = opt.nps_receipts_by_claim_age(user, cfg, "wife")
+        st.plotly_chart(viz.fig_nps_by_claim_age(w_recv, w_lbl), use_container_width=True)
+
+    g4, g5 = st.columns(2)
     with g4:
         if user.use_housing_pension:
             hdf = opt.shortfall_by_housing_age(user, cfg)
             st.plotly_chart(viz.fig_shortfall_by_housing(hdf), use_container_width=True)
         else:
             st.info("주택연금 미사용 — ④ 그래프 생략")
-
-    g5, g6 = st.columns(2)
     with g5:
         st.plotly_chart(viz.fig_heatmap(df, "shortfall_total"), use_container_width=True)
+
+    g6, g7 = st.columns(2)
     with g6:
         idf = opt.shortfall_by_inflation(user, cfg)
         st.plotly_chart(viz.fig_shortfall_by_inflation(idf), use_container_width=True)
-
-    g7, g8 = st.columns(2)
     with g7:
         with st.spinner("기대수명별 최적 전략 탐색..."):
             ldf = opt.best_strategy_by_life(user, cfg, "stable")
         st.plotly_chart(viz.fig_best_by_life(ldf), use_container_width=True)
+
+    g8, g9 = st.columns(2)
     with g8:
         st.plotly_chart(
             viz.fig_pareto(df, pareto, best_id=int(best_row["id"])),
             use_container_width=True,
         )
-
-    st.plotly_chart(viz.fig_score_scatter(df, "stable"), use_container_width=True)
+    with g9:
+        st.plotly_chart(viz.fig_score_scatter(df, "stable"), use_container_width=True)
 
     # 4) 내보내기 ------------------------------------------------------------
     st.header("💾 내보내기")

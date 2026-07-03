@@ -23,18 +23,23 @@ import numpy as np
 import pandas as pd
 
 import nps
+import pension
 from cashflow import Strategy, Scenario, simulate
-from config import Config, UserInput
+from config import Config, UserInput, Person
 
 
 # ---------------------------------------------------------------------------
 # 1. 조합 생성
 # ---------------------------------------------------------------------------
-def _claim_age_range(birth_year: int, cfg: Config) -> List[int]:
-    """한 사람의 탐색 대상 국민연금 수령개시나이 목록(정상 ±조기/연기 한도)."""
-    normal = nps.normal_start_age(birth_year, cfg.nps)
-    low = normal - cfg.nps.max_early_years
-    high = normal + cfg.nps.max_defer_years
+def _claim_age_range(person: Person, cfg: Config) -> List[int]:
+    """
+    한 사람의 탐색 대상 연금 수령개시나이 목록(정상 ±조기/연기 한도).
+    연금 종류(국민연금/교직원연금)에 따라 조기/연기 허용 연수가 다르므로 제도별로 계산한다.
+    """
+    module, policy = pension.resolve(person, cfg)
+    normal = module.normal_start_age(person.birth_year, policy)
+    low = normal - policy.max_early_years
+    high = normal + policy.max_defer_years
     return list(range(low, high + 1))
 
 
@@ -62,8 +67,8 @@ def generate_strategies(
     h_life = husband_life if husband_life is not None else user.husband_life_expectancy
     w_life = wife_life if wife_life is not None else user.wife_life_expectancy
 
-    h_ages = _claim_age_range(user.husband.birth_year, cfg)
-    w_ages = _claim_age_range(user.wife.birth_year, cfg)
+    h_ages = _claim_age_range(user.husband, cfg)
+    w_ages = _claim_age_range(user.wife, cfg)
 
     if housing_ages is None:
         # 55세부터 남편 은퇴+15년까지 3년 간격으로 탐색.
@@ -237,19 +242,50 @@ def explain(row: pd.Series, df: pd.DataFrame) -> str:
 # ---------------------------------------------------------------------------
 # 6. 민감도 분석 헬퍼(그래프용)
 # ---------------------------------------------------------------------------
+def _breakeven_age(module, person, claim_age, policy, inflation, principal, max_age=110):
+    """
+    원금확보(손익분기) 나이 계산.
+
+    개시나이부터 누적 연금수령액이 '납입원금(principal)'을 처음으로 넘어서는 나이를 반환.
+    - 물가연동을 반영한 각 연도 수령액을 누적한다.
+    - 납입원금이 0이거나 수명 내에 회수되지 않으면 None.
+    """
+    if principal <= 0:
+        return None
+    base = module.monthly_pension(person, claim_age, policy)
+    cumulative = 0.0
+    for y in range(0, max_age - claim_age):
+        cumulative += module.indexed_monthly_pension(base, y, inflation, policy) * 12
+        if cumulative >= principal:
+            return claim_age + y + 1  # 해당 연차 말 기준 나이
+    return None
+
+
 def nps_receipts_by_claim_age(user: UserInput, cfg: Config, which: str = "husband") -> pd.DataFrame:
     """
-    국민연금 수령개시나이별 '명목 총수령액'과 '개시시점 월수령액'을 계산.
-    그래프3(수령시점별 총수령액 비교)용.
+    연금 수령개시나이별 '명목 총수령액', '개시시점 월수령액', '납입원금', '원금확보 나이'를 계산.
+    그래프3(수령시점별 총수령액 비교)용. 대상자의 연금 제도(국민/교직원)에 맞춰 계산한다.
+
+    - principal(납입원금)과 breakeven_age(원금확보 나이)를 함께 반환하여
+      "언제부터 받으면 몇 세에 원금을 회수하는지"를 시각화할 수 있게 한다.
     """
     person = user.husband if which == "husband" else user.wife
     death = user.husband_life_expectancy if which == "husband" else user.wife_life_expectancy
-    ages = _claim_age_range(person.birth_year, cfg)
+    module, policy = pension.resolve(person, cfg)
+    principal = getattr(person, "paid_principal", 0.0)
+    ages = _claim_age_range(person, cfg)
     rows = []
     for age in ages:
-        monthly = nps.monthly_pension(person, age, cfg.nps)
-        total = nps.total_nominal_receipts(person, age, death, user.inflation_rate, cfg.nps)
-        rows.append({"claim_age": age, "monthly": monthly, "total_nominal": total})
+        monthly = module.monthly_pension(person, age, policy)
+        total = module.total_nominal_receipts(person, age, death, user.inflation_rate, policy)
+        be_age = _breakeven_age(module, person, age, policy, user.inflation_rate, principal)
+        rows.append({
+            "claim_age": age,
+            "monthly": monthly,
+            "total_nominal": total,
+            "principal": principal,
+            "breakeven_age": be_age,
+        })
     return pd.DataFrame(rows)
 
 

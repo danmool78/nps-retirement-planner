@@ -93,6 +93,51 @@ class HousingPolicy:
 
 
 # ---------------------------------------------------------------------------
+# 2-b. 제도(교직원연금 = 사립학교교직원연금/사학연금) 파라미터
+# ---------------------------------------------------------------------------
+@dataclass
+class TeacherPolicy:
+    """
+    교직원연금(사학연금) 관련 제도 파라미터.
+
+    국민연금과의 주요 차이
+    - 조기(조기퇴직)연금 감액이 '연 5%' 단위(국민연금은 월 0.5%).
+    - 연기수령 가산 제도가 사실상 없음(기본 max_defer_years=0).
+    - 지급개시연령이 60→65세로 단계 상향 중(공무원연금과 동일 스케줄).
+    - 추납/임의가입 개념은 국민연금 전용이므로 여기서는 사용하지 않음.
+    실제 사학연금액은 기준소득월액·재직기간으로 산정되며, 여기서는 국민연금과 동일하게
+    '정상개시 예상 월액'을 입력받아 조기감액 배수를 적용하는 근사 모델을 쓴다(모두 수정 가능).
+    """
+
+    # 조기퇴직연금 감액률(연 기준). 1년 앞당길 때마다 5% 감액(최대 5년 25%).
+    early_yearly_reduction: float = 0.05
+    max_early_years: int = 5
+
+    # 연기수령 가산(사학연금은 기본 없음). 필요 시 화면에서 켤 수 있도록 파라미터만 둔다.
+    defer_yearly_increase: float = 0.0
+    max_defer_years: int = 0
+
+    # 출생연도 -> 정상 지급개시연령 근사표(60→65 단계 상향을 출생연도로 근사).
+    # 사학연금 개시연령은 원래 '퇴직연도' 기준이나, 앱 모델 일관성을 위해 출생연도로 근사한다.
+    start_age_table: List[tuple] = field(
+        default_factory=lambda: [
+            (0, 60),
+            (1958, 61),
+            (1960, 62),
+            (1963, 63),
+            (1966, 64),
+            (1969, 65),
+        ]
+    )
+
+    # 사학연금도 매년 물가변동률만큼 연금액이 조정된다(물가연동).
+    inflation_indexed: bool = True
+
+    # 유족연금 지급률(퇴직연금 대비). 통상 60%.
+    survivor_pension_rate: float = 0.60
+
+
+# ---------------------------------------------------------------------------
 # 3. 최적화 파라미터
 # ---------------------------------------------------------------------------
 @dataclass
@@ -148,9 +193,17 @@ class Person:
     label: str                 # '남편' / '아내' 등 표시용 라벨
     birth_year: int            # 출생연도
     birth_month: int = 1       # 출생월(월 단위 시뮬레이션 정밀도용)
-    nps_monthly: float = 0.0   # 정상개시연령 기준 국민연금 예상 월수령액(원)
+    nps_monthly: float = 0.0   # 정상개시연령 기준 연금 예상 월수령액(원)
 
-    # 국민연금 수령개시나이(사용자 지정). None 이면 optimizer 가 탐색.
+    # 연금 종류: "nps"(국민연금) 또는 "teacher"(교직원연금/사학연금).
+    # 부부가 서로 다른 제도일 수 있으므로 사람 단위로 지정한다.
+    pension_type: str = "nps"
+
+    # 지금까지 납입한 총 보험료(원). '원금확보(손익분기) 시점' 계산에 사용.
+    # 누적 연금수령액이 이 금액을 넘어서는 나이가 원금 회수 시점이 된다.
+    paid_principal: float = 0.0
+
+    # 연금 수령개시나이(사용자 지정). None 이면 optimizer 가 탐색.
     nps_claim_age: int | None = None
 
     # 추납 가능기간(년)과 추납 총비용(원). 추납을 선택하면 비용을 금융자산에서 차감.
@@ -204,6 +257,7 @@ class Config:
     """모든 파라미터 묶음. app.py 에서 이 객체 하나만 주고받는다."""
 
     nps: NpsPolicy = field(default_factory=NpsPolicy)
+    teacher: TeacherPolicy = field(default_factory=TeacherPolicy)
     housing: HousingPolicy = field(default_factory=HousingPolicy)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
 
