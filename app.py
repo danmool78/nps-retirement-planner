@@ -362,7 +362,11 @@ def main():
         )
         guide("pareto")
     with g9:
-        st.plotly_chart(viz.fig_score_scatter(df, "stable"), use_container_width=True)
+        # 산점도 점 색상의 '점수 기준' 관점을 사용자가 선택.
+        SCATTER_VIEWS = {"안정형": "stable", "총수령액 극대화형": "maximize", "상속중시형": "bequest"}
+        sview = SCATTER_VIEWS[st.selectbox("산점도 색 기준(관점)", list(SCATTER_VIEWS),
+                                           key="scatterview")]
+        st.plotly_chart(viz.fig_score_scatter(df, sview), use_container_width=True)
         guide("scatter")
 
     # 4) 내보내기 ------------------------------------------------------------
