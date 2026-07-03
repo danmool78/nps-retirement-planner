@@ -15,6 +15,8 @@ MVP 원칙: 실행 가능한 최소버전. 세부 제도 산식은 각 모듈의
 
 from __future__ import annotations
 
+import gc
+
 import streamlit as st
 
 import nps
@@ -117,7 +119,10 @@ def guide(key: str):
 # 무거운 계산은 캐싱하여 위젯 조작 시 재계산을 방지(메모리·속도 절약)
 # UserInput/Config 는 dataclass 이므로 repr 로 해시 키를 만든다.
 # ---------------------------------------------------------------------------
-@st.cache_data(hash_funcs={UserInput: repr, Config: repr}, show_spinner=False, max_entries=2)
+# max_entries=1: 직전 결과 1개만 캐시에 유지(메모리 누적 방지).
+# ttl=3600: 1시간 지나면 캐시 자동 만료로 메모리 회수.
+@st.cache_data(hash_funcs={UserInput: repr, Config: repr},
+               show_spinner=False, max_entries=1, ttl=3600)
 def compute_pipeline(user: UserInput, cfg: Config) -> dict:
     """전 조합 평가·점수·파레토·민감도·추천 시나리오를 한 번에 계산하고 캐싱한다."""
     strategies = opt.generate_strategies(user, cfg)
@@ -277,6 +282,14 @@ def main():
     if st.sidebar.button("🚀 시뮬레이션 실행", type="primary"):
         st.session_state["ran"] = True
 
+    # 메모리 수동 정리: 캐시 비우기 + 가비지 컬렉션(리소스 한도 방지용).
+    if st.sidebar.button("🧹 캐시/메모리 비우기"):
+        st.cache_data.clear()
+        st.session_state.pop("ran", None)
+        gc.collect()
+        st.sidebar.success("캐시와 메모리를 비웠습니다.")
+        st.stop()
+
     if not st.session_state.get("ran"):
         st.info("좌측에서 값을 입력하고 **시뮬레이션 실행**을 눌러주세요.")
         h_normal = pension.normal_start_age(user.husband, cfg)
@@ -291,6 +304,7 @@ def main():
     # 1) 무거운 계산은 캐싱된 파이프라인으로(입력이 같으면 위젯 조작 시 재계산 안 함).
     with st.spinner("조합을 계산 중입니다(물가 스트레스 포함)..."):
         R = compute_pipeline(user, cfg)
+    gc.collect()  # 계산 과정의 임시 객체를 즉시 회수하여 peak 메모리를 낮춤.
     df, pareto, tops = R["df"], R["pareto"], R["tops"]
     best_row = tops["stable"].iloc[0]
     best_scenario = R["best_scenario"]
