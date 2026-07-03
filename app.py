@@ -348,75 +348,112 @@ def main():
     st.caption("물가는 예측이 불가하므로, 이 전략이 **물가가 얼마까지 올라도 부족이 없는지**로 안전성을 봅니다.")
     guide("margin")
 
-    # 3) 그래프 8종 ----------------------------------------------------------
+    # 3) 그래프 ---------------------------------------------------------------
+    # 각 그래프를 변수로 만들어 화면 표시 + 리포트(report_figs) 수집에 함께 사용.
     st.header("📊 그래프")
+    report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
+
+    fig_cf = viz.fig_monthly_cashflow(best_scenario)
+    fig_as = viz.fig_cumulative_assets(best_scenario)
     g1, g2 = st.columns(2)
     with g1:
-        st.plotly_chart(viz.fig_monthly_cashflow(best_scenario), use_container_width=True)
-        guide("cashflow")
+        st.plotly_chart(fig_cf, use_container_width=True); guide("cashflow")
     with g2:
-        st.plotly_chart(viz.fig_cumulative_assets(best_scenario), use_container_width=True)
-        guide("assets")
+        st.plotly_chart(fig_as, use_container_width=True); guide("assets")
+    report_figs += [("① 연령별 월 현금흐름", fig_cf), ("② 연령별 누적자산", fig_as)]
 
-    # ③ 나이별 누적 수령액·원금확보 시점 — 남편/아내 각각(기대수명까지 그림).
+    # ③ 나이별 누적 수령액·원금확보 시점 — 남편/아내 각각.
+    h_lbl = f"남편·{pension.type_label(user.husband)}"
+    w_lbl = f"아내·{pension.type_label(user.wife)}"
+    fig_h = viz.fig_cumulative_receipts(*R["husband_curves"], h_lbl)
+    fig_w = viz.fig_cumulative_receipts(*R["wife_curves"], w_lbl)
     g3, g3b = st.columns(2)
     with g3:
-        h_lbl = f"남편·{pension.type_label(user.husband)}"
-        h_curves, h_prin, h_be, h_death, h_reps, h_mon = R["husband_curves"]
-        st.plotly_chart(
-            viz.fig_cumulative_receipts(h_curves, h_prin, h_be, h_death, h_reps, h_mon, h_lbl),
-            use_container_width=True)
-        guide("receipts")
+        st.plotly_chart(fig_h, use_container_width=True); guide("receipts")
     with g3b:
-        w_lbl = f"아내·{pension.type_label(user.wife)}"
-        w_curves, w_prin, w_be, w_death, w_reps, w_mon = R["wife_curves"]
-        st.plotly_chart(
-            viz.fig_cumulative_receipts(w_curves, w_prin, w_be, w_death, w_reps, w_mon, w_lbl),
-            use_container_width=True)
-        guide("receipts")
+        st.plotly_chart(fig_w, use_container_width=True); guide("receipts")
+    report_figs += [(f"③ 누적 수령액·원금확보 ({h_lbl})", fig_h),
+                    (f"③ 누적 수령액·원금확보 ({w_lbl})", fig_w)]
 
+    fig_hz = viz.fig_heatmap(df, "shortfall_total")
     g4, g5 = st.columns(2)
     with g4:
         if R["housing_df"] is not None:
-            st.plotly_chart(viz.fig_shortfall_by_housing(R["housing_df"]), use_container_width=True)
-            guide("housing")
+            fig_ho = viz.fig_shortfall_by_housing(R["housing_df"])
+            st.plotly_chart(fig_ho, use_container_width=True); guide("housing")
+            report_figs.append(("④ 주택연금 개시별 부족액", fig_ho))
         else:
             st.info("주택연금 미사용 — ④ 그래프 생략")
     with g5:
-        st.plotly_chart(viz.fig_heatmap(df, "shortfall_total"), use_container_width=True)
-        guide("heatmap")
+        st.plotly_chart(fig_hz, use_container_width=True); guide("heatmap")
+    report_figs.append(("⑤ 국민×주택 히트맵", fig_hz))
 
+    fig_in = viz.fig_shortfall_by_inflation(R["inflation_df"])
+    fig_li = viz.fig_best_by_life(R["life_df"])
     g6, g7 = st.columns(2)
     with g6:
-        st.plotly_chart(viz.fig_shortfall_by_inflation(R["inflation_df"]), use_container_width=True)
-        guide("inflation")
+        st.plotly_chart(fig_in, use_container_width=True); guide("inflation")
     with g7:
-        st.plotly_chart(viz.fig_best_by_life(R["life_df"]), use_container_width=True)
-        guide("life")
+        st.plotly_chart(fig_li, use_container_width=True); guide("life")
+    report_figs += [("⑥ 물가상승률별 부족액", fig_in), ("⑦ 기대수명별 전략", fig_li)]
 
+    fig_pa = viz.fig_pareto(df, pareto, best_id=R["best_id"])
     g8, g9 = st.columns(2)
     with g8:
-        st.plotly_chart(
-            viz.fig_pareto(df, pareto, best_id=R["best_id"]),
-            use_container_width=True,
-        )
-        guide("pareto")
+        st.plotly_chart(fig_pa, use_container_width=True); guide("pareto")
     with g9:
-        # 산점도 점 색상의 '점수 기준' 관점을 사용자가 선택.
         SCATTER_VIEWS = {"안정형": "stable", "총수령액 극대화형": "maximize", "상속중시형": "bequest"}
         sview = SCATTER_VIEWS[st.selectbox("산점도 색 기준(관점)", list(SCATTER_VIEWS),
                                            key="scatterview")]
-        # 별표는 '선택한 관점'의 1위 조합을 가리키도록(색 기준과 일치).
         sview_best = int(tops[sview].iloc[0]["id"])
+        fig_sc = viz.fig_score_scatter(df, sview, best_id=sview_best)
         try:
-            st.plotly_chart(viz.fig_score_scatter(df, sview, best_id=sview_best),
-                            use_container_width=True)
+            st.plotly_chart(fig_sc, use_container_width=True)
         except Exception as e:  # 산점도 렌더 실패가 전체 앱을 멈추지 않도록.
             st.warning(f"산점도를 그리는 중 문제가 발생해 건너뜁니다: {e}")
         guide("scatter")
+    report_figs += [("⑧ Pareto Frontier", fig_pa), ("⑨ 조합별 점수 산점도", fig_sc)]
 
     # 4) 내보내기 ------------------------------------------------------------
-    st.header("💾 내보내기")
+    st.header("💾 내보내기 / 리포트")
+
+    # --- 전체 리포트(입력요약·표·그래프 전부)를 담은 HTML → 브라우저에서 PDF 저장 ---
+    if margin is None:
+        margin_text = "현재 가정에서도 생활비 부족 발생 (0% 미만) — 전략 재검토 필요"
+    elif margin >= cfg.optimizer.margin_max_inflation:
+        margin_text = f"물가 {margin*100:.1f}%+ 까지도 부족 없이 매우 견고"
+    else:
+        margin_text = (f"물가 ~{margin*100:.1f}% 까지 부족 없이 안전 "
+                       f"(현재 가정 물가 {user.inflation_rate*100:.1f}%)")
+
+    summary = {
+        "n_combos": R["n"],
+        "normal_ages": (f"정상개시 남편({pension.type_label(user.husband)}) "
+                        f"{pension.normal_start_age(user.husband, cfg)}세 / "
+                        f"아내({pension.type_label(user.wife)}) "
+                        f"{pension.normal_start_age(user.wife, cfg)}세"),
+        "margin": margin_text,
+        "inputs": [
+            ("남편", f"{pension.type_label(user.husband)} · {user.husband.birth_year}년생 · "
+                     f"월 {user.husband.nps_monthly:,.0f}원 · 납입원금 {user.husband.paid_principal:,.0f}원 · "
+                     f"기대수명 {user.husband_life_expectancy}세"),
+            ("아내", f"{pension.type_label(user.wife)} · {user.wife.birth_year}년생 · "
+                     f"월 {user.wife.nps_monthly:,.0f}원 · 납입원금 {user.wife.paid_principal:,.0f}원 · "
+                     f"기대수명 {user.wife_life_expectancy}세"),
+            ("은퇴나이 / 월 생활비", f"{user.retirement_age}세 / {user.living_expense_monthly:,.0f}원"),
+            ("금융자산 / 투자수익률", f"{user.financial_assets:,.0f}원 / {user.investment_return*100:.1f}%"),
+            ("물가상승률", f"{user.inflation_rate*100:.1f}%"),
+            ("주택", (f"{user.house_value:,.0f}원 · 주택연금 월 {user.housing_monthly_base:,.0f}원"
+                      if user.use_housing_pension else "주택연금 미사용")),
+        ],
+    }
+    report_bytes = export.build_html_report(report_figs, tops, summary)
+    st.download_button(
+        "📄 전체 리포트 다운로드 (그래프·표 포함)",
+        report_bytes, "노후자금리포트.html", "text/html", type="primary",
+    )
+    st.caption("내려받은 파일을 열고 **Ctrl+P → '대상: PDF로 저장'** 하면 한글·그래프 그대로 PDF가 됩니다.")
+
     e1, e2 = st.columns(2)
     with e1:
         st.download_button("CSV 다운로드(전체 조합)", export.to_csv_bytes(df),
