@@ -78,6 +78,27 @@ def _person_base_pension(
     return module.monthly_pension(person, claim_age, policy, use_chunap, use_voluntary)
 
 
+def _survivor_total(own_pension: float, deceased_pension: float, dead_policy, mode: str) -> float:
+    """
+    배우자 사망 시 생존자가 받는 '총 월연금'(중복급여 조정).
+
+    - 유족연금 = 사망자 연금 × 유족지급률(dead_policy.survivor_pension_rate, 예:60%)
+    - 선택지 A(본인연금 우선) : 본인 노령연금 + 유족연금 × 중복조정률(예:30%)
+    - 선택지 B(유족연금 전액) : 유족연금 전액(본인 노령연금 포기)
+    - mode: "own_plus"=A, "survivor_full"=B, "auto"=둘 중 큰 값(유리한 쪽)
+
+    반환값은 '본인연금+유족조정'을 포함한 생존자 총 수령액이다.
+    """
+    survivor = deceased_pension * dead_policy.survivor_pension_rate
+    opt_a = own_pension + survivor * getattr(dead_policy, "survivor_dup_rate", 0.30)
+    opt_b = survivor
+    if mode == "own_plus":
+        return opt_a
+    if mode == "survivor_full":
+        return opt_b
+    return max(opt_a, opt_b)  # auto
+
+
 # ---------------------------------------------------------------------------
 # 메인 시뮬레이션
 # ---------------------------------------------------------------------------
@@ -170,20 +191,22 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
                 w_base, years_since, strat.inflation_rate, w_pol
             )
 
-        # --- 2) 유족연금(한쪽 사망 시) ---
+        # --- 2) 유족연금(한쪽 사망 시, 중복급여 조정) ---
+        # 생존자는 '본인 노령연금 + 유족연금 일부' vs '유족연금 전액' 중 선택(user.survivor_mode).
+        # survivor_extra = 본인연금 위에 '추가로' 받는 금액(선택 총액 - 본인연금).
         survivor_extra = 0.0
         if h_alive and not w_alive and w_base > 0:
             years_since = int(w_age - strat.wife_claim_age) if w_age >= strat.wife_claim_age else 0
             dead_pension = w_mod.indexed_monthly_pension(
                 w_base, max(0, years_since), strat.inflation_rate, w_pol
             )
-            survivor_extra = dead_pension * w_pol.survivor_pension_rate
+            survivor_extra = _survivor_total(h_pension, dead_pension, w_pol, user.survivor_mode) - h_pension
         elif w_alive and not h_alive and h_base > 0:
             years_since = int(h_age - strat.husband_claim_age) if h_age >= strat.husband_claim_age else 0
             dead_pension = h_mod.indexed_monthly_pension(
                 h_base, max(0, years_since), strat.inflation_rate, h_pol
             )
-            survivor_extra = dead_pension * h_pol.survivor_pension_rate
+            survivor_extra = _survivor_total(w_pension, dead_pension, h_pol, user.survivor_mode) - w_pension
 
         # --- 3) 주택연금(종신: 마지막 생존자까지 지급) ---
         house_income = 0.0

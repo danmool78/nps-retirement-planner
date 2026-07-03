@@ -199,6 +199,14 @@ def build_inputs():
     retire_age = st.sidebar.number_input("은퇴나이(남편 기준)", 50, 75, 60)
     living = st.sidebar.number_input("월 생활비(부부합산, 원)", 0, 20_000_000, 3_000_000, 100_000)
     single_ratio = st.sidebar.slider("단독생존 생활비 비율", 0.4, 1.0, 0.65, 0.05)
+    SURV_MODES = {
+        "자동(유리한 쪽 선택)": "auto",
+        "본인연금 + 유족 일부": "own_plus",
+        "유족연금 전액(본인 포기)": "survivor_full",
+    }
+    survivor_mode = SURV_MODES[st.sidebar.selectbox(
+        "배우자 사망 시 유족연금 처리", list(SURV_MODES),
+        help="본인 노령연금+유족연금 일부 vs 유족연금 전액 중 무엇을 받을지. 자동은 유리한 쪽을 택합니다.")]
     assets = st.sidebar.number_input("금융자산(원)", 0, 5_000_000_000, 200_000_000, 10_000_000)
     invest = st.sidebar.slider("투자수익률(연,%)", 0.0, 10.0, 3.0, 0.5) / 100
     inflation = st.sidebar.slider("물가상승률(연,%)", 0.0, 6.0, 2.0, 0.5) / 100
@@ -213,6 +221,8 @@ def build_inputs():
         early = st.number_input("조기수령 월감액률(%)", 0.0, 2.0, 0.5, 0.05) / 100
         defer = st.number_input("연기수령 월가산률(%)", 0.0, 2.0, 0.6, 0.05) / 100
         surv = st.number_input("국민 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0) / 100
+        dup = st.number_input("유족연금 중복조정률(%)", 0.0, 100.0, 30.0, 5.0,
+                              help="본인 노령연금 선택 시 함께 받는 유족연금 비율(현행 30%)") / 100
         house_factor = st.number_input("주택연금 나이계수(1세당,%)", 0.0, 20.0, 6.0, 0.5) / 100
         discount = st.number_input("현재가치 할인율(%)", 0.0, 10.0, 2.0, 0.5) / 100
     with st.sidebar.expander("교직원연금(사학연금) 파라미터"):
@@ -237,6 +247,7 @@ def build_inputs():
     user = UserInput(
         husband=husband, wife=wife,
         living_expense_monthly=living, single_expense_ratio=single_ratio,
+        survivor_mode=survivor_mode,
         financial_assets=assets, investment_return=invest, inflation_rate=inflation,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
@@ -245,9 +256,11 @@ def build_inputs():
 
     cfg = Config(
         nps=NpsPolicy(early_monthly_reduction=early, defer_monthly_increase=defer,
-                      survivor_pension_rate=surv),
-        teacher=TeacherPolicy(early_yearly_reduction=t_early, survivor_pension_rate=t_surv),
-        gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv),
+                      survivor_pension_rate=surv, survivor_dup_rate=dup),
+        teacher=TeacherPolicy(early_yearly_reduction=t_early, survivor_pension_rate=t_surv,
+                              survivor_dup_rate=dup),
+        gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv,
+                      survivor_dup_rate=dup),
         housing=HousingPolicy(age_factor_per_year=house_factor),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
