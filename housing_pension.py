@@ -36,12 +36,32 @@ def estimate_base_monthly(house_value: float, policy: HousingPolicy) -> float:
     """
     주택가격으로부터 base_age(60세) 기준 '기준 월지급액'을 추정.
 
-    월지급액 = (상한적용 주택가격 / 1억) × payment_per_100m_at_base
+    월지급액 = (상한적용 주택가격 / 1억) × HF표의 base_age 1억당 월지급액
     - 주택가격 상한(12억)을 먼저 적용하므로, 그 이상 비싼 집도 12억 기준으로 산정된다(max 캡).
-    - 개시나이별 증감은 monthly_payment() 에서 age_factor 로 별도 반영한다.
+    - 개시나이별 증감은 monthly_payment() 에서 HF표 비율로 반영한다.
     """
     capped = capped_house_value(house_value, policy)
-    return (capped / 100_000_000) * policy.payment_per_100m_at_base
+    return (capped / 100_000_000) * per_100m_at_age(policy.base_age, policy)
+
+
+def per_100m_at_age(age: float, policy: HousingPolicy) -> float:
+    """
+    HF 예시표(monthly_per_100m)를 선형 보간/외삽하여 특정 나이의 '1억원당 월지급액'을 반환.
+    """
+    table = sorted(policy.monthly_per_100m)  # [(age, won)] 오름차순
+    if age <= table[0][0]:
+        # 표 하한 이하: 하한 두 점 기울기로 선형 외삽(가입 최소연령 제한은 별도 처리).
+        (a0, v0), (a1, v1) = table[0], table[1]
+    elif age >= table[-1][0]:
+        (a0, v0), (a1, v1) = table[-2], table[-1]
+    else:
+        # 사이 구간: age 를 감싸는 두 점 선택.
+        for i in range(len(table) - 1):
+            if table[i][0] <= age <= table[i + 1][0]:
+                (a0, v0), (a1, v1) = table[i], table[i + 1]
+                break
+    slope = (v1 - v0) / (a1 - a0)
+    return v0 + slope * (age - a0)
 
 
 def monthly_payment(
@@ -50,17 +70,16 @@ def monthly_payment(
     policy: HousingPolicy,
 ) -> float:
     """
-    주택연금 개시나이에 따른 월지급액(근사).
+    주택연금 개시나이에 따른 월지급액.
 
-    월지급액 = 기준월지급액 × (1 + age_factor_per_year)^(개시나이 - 기준나이)
-
-    - 개시나이가 기준나이보다 많으면 증액, 적으면 감액된다.
+    월지급액 = 기준월지급액(base_age 기준) × [HF표 개시나이 1억당액 / HF표 base_age 1억당액]
+    - HF 실제 예시표 비율을 그대로 적용하므로 고령에서의 과대추정이 없다.
     - 최소 가입연령 미만이면 0 을 반환(수급 불가).
     """
     if not is_eligible(start_age, policy):
         return 0.0
-    age_diff = start_age - policy.base_age
-    return housing_monthly_base * ((1.0 + policy.age_factor_per_year) ** age_diff)
+    factor = per_100m_at_age(start_age, policy) / per_100m_at_age(policy.base_age, policy)
+    return housing_monthly_base * factor
 
 
 def indexed_monthly_payment(

@@ -238,7 +238,6 @@ def build_inputs():
         surv = st.number_input("국민 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0) / 100
         dup = st.number_input("유족연금 중복조정률(%)", 0.0, 100.0, 30.0, 5.0,
                               help="본인 노령연금 선택 시 함께 받는 유족연금 비율(현행 30%)") / 100
-        house_factor = st.number_input("주택연금 나이계수(1세당,%)", 0.0, 20.0, 6.0, 0.5) / 100
         discount = st.number_input("현재가치 할인율(%)", 0.0, 10.0, 2.0, 0.5) / 100
     with st.sidebar.expander("교직원연금(사학연금) 파라미터"):
         t_early = st.number_input("조기퇴직연금 연감액률(%)", 0.0, 10.0, 5.0, 0.5,
@@ -276,7 +275,7 @@ def build_inputs():
                               survivor_dup_rate=dup),
         gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv,
                       survivor_dup_rate=dup),
-        housing=HousingPolicy(age_factor_per_year=house_factor, house_price_cap=house_cap),
+        housing=HousingPolicy(house_price_cap=house_cap),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
     return user, cfg
