@@ -27,6 +27,23 @@ def is_eligible(start_age: int, policy: HousingPolicy) -> bool:
     return start_age >= policy.min_start_age
 
 
+def capped_house_value(house_value: float, policy: HousingPolicy) -> float:
+    """주택가격 상한(현행 12억) 적용. 상한 초과분은 월지급액 산정에 반영되지 않는다."""
+    return min(house_value, policy.house_price_cap)
+
+
+def estimate_base_monthly(house_value: float, policy: HousingPolicy) -> float:
+    """
+    주택가격으로부터 base_age(60세) 기준 '기준 월지급액'을 추정.
+
+    월지급액 = (상한적용 주택가격 / 1억) × payment_per_100m_at_base
+    - 주택가격 상한(12억)을 먼저 적용하므로, 그 이상 비싼 집도 12억 기준으로 산정된다(max 캡).
+    - 개시나이별 증감은 monthly_payment() 에서 age_factor 로 별도 반영한다.
+    """
+    capped = capped_house_value(house_value, policy)
+    return (capped / 100_000_000) * policy.payment_per_100m_at_base
+
+
 def monthly_payment(
     housing_monthly_base: float,
     start_age: int,

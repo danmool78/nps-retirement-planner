@@ -87,6 +87,13 @@ class HousingPolicy:
     # 주택연금 개시 가능 최소 연령(현행 55세).
     min_start_age: int = 55
 
+    # 주택가격 상한(현행 12억원). 이보다 비싼 집도 이 금액 기준으로 월지급액이 산정된다(상한 캡).
+    house_price_cap: float = 1_200_000_000
+
+    # 주택가격 기준 자동 산정용 계수: base_age(60세)에서 '주택가격 1억원당 월지급액'.
+    # 예) 60세·5억 주택 → 5 × 20만 = 월 100만원(근사). 실제 HF 산식과 다를 수 있어 수정 가능.
+    payment_per_100m_at_base: float = 200_000
+
     # 주택연금(종신 정액형)은 명목상 정액. 물가에 연동되지 않음(기본 False).
     inflation_indexed: bool = False
 

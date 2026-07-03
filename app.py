@@ -21,6 +21,7 @@ import streamlit as st
 
 import nps
 import pension
+import housing_pension as hp
 import optimizer as opt
 import visualization as viz
 import export
@@ -214,7 +215,19 @@ def build_inputs():
     st.sidebar.header("🏠 주택연금")
     use_house = st.sidebar.checkbox("주택연금 사용", True)
     house_val = st.sidebar.number_input("주택가격(원)", 0, 5_000_000_000, 500_000_000, 10_000_000)
-    house_monthly = st.sidebar.number_input("주택연금 기준월지급액(원)", 0, 10_000_000, 1_200_000, 50_000)
+    house_cap = st.sidebar.number_input(
+        "주택가격 상한(원)", 0, 5_000_000_000, 1_200_000_000, 100_000_000,
+        help="이 금액을 초과하는 주택도 상한 기준으로 월지급액이 산정됩니다(현행 12억).")
+    auto_house = st.sidebar.checkbox("주택가격 기준 자동산정(상한 반영)", True)
+    _hpol = HousingPolicy(house_price_cap=house_cap)
+    if auto_house:
+        house_monthly = int(hp.estimate_base_monthly(house_val, _hpol))
+        st.sidebar.number_input("기준월지급액(자동, 60세 기준·원)", value=house_monthly, disabled=True)
+        if house_val > house_cap:
+            st.sidebar.caption(f"⚠️ 주택가격이 상한({house_cap/1e8:.0f}억) 초과 → 상한 기준으로 산정")
+    else:
+        house_monthly = st.sidebar.number_input(
+            "주택연금 기준월지급액(원)", 0, 10_000_000, 1_200_000, 50_000)
 
     st.sidebar.header("⚙️ 제도 파라미터(고급)")
     with st.sidebar.expander("국민연금 감액/가산/계수"):
@@ -261,7 +274,7 @@ def build_inputs():
                               survivor_dup_rate=dup),
         gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv,
                       survivor_dup_rate=dup),
-        housing=HousingPolicy(age_factor_per_year=house_factor),
+        housing=HousingPolicy(age_factor_per_year=house_factor, house_price_cap=house_cap),
         optimizer=OptimizerConfig(discount_rate=discount),
     )
     return user, cfg
@@ -366,7 +379,12 @@ def main():
     st.header("📊 그래프")
     report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
 
-    fig_cf = viz.fig_monthly_cashflow(best_scenario)
+    # 사망 시점(남편 나이축)을 계산해 현금흐름 그래프에 표시.
+    wife_start = user.retirement_age - (user.wife.birth_year - user.husband.birth_year)
+    h_death_age = float(best_row["h_life"])                          # 남편 사망 = 남편 기대수명
+    w_death_age = user.retirement_age + (float(best_row["w_life"]) - wife_start)  # 아내 사망(남편나이 환산)
+    deaths = sorted([("남편 사망", h_death_age), ("아내 사망", w_death_age)], key=lambda t: t[1])
+    fig_cf = viz.fig_monthly_cashflow(best_scenario, deaths=deaths)
     fig_as = viz.fig_cumulative_assets(best_scenario)
     g1, g2 = st.columns(2)
     with g1:

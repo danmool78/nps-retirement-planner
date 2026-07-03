@@ -28,8 +28,11 @@ _MAN = 10_000  # 원 -> 만원
 
 
 # 1) 연령별 월 현금흐름 ------------------------------------------------------
-def fig_monthly_cashflow(sc: Scenario) -> go.Figure:
-    """선택된 전략의 월별 수입/지출/순현금흐름을 남편 나이축으로 표시."""
+def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
+    """
+    선택된 전략의 월별 수입/지출/순현금흐름을 남편 나이축으로 표시.
+    deaths: [(라벨, 남편나이축_사망나이)] — 사망 시점에 세로 점선을 그어 그래프 급변 이유를 표시.
+    """
     df = sc.frame
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["income"] / _MAN,
@@ -38,6 +41,13 @@ def fig_monthly_cashflow(sc: Scenario) -> go.Figure:
                              name="생활비 지출", line=dict(color="#E74C3C")))
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["net"] / _MAN,
                              name="순현금흐름", line=dict(color="#27AE60", dash="dot")))
+
+    # 사망 시점 세로선(수입·지출이 급변하는 이유를 명시).
+    for label, age in (deaths or []):
+        fig.add_vline(x=age, line_dash="dash", line_color="#7F8C8D",
+                      annotation_text=f"⚰️ {label}", annotation_position="top",
+                      annotation_font_size=11, annotation_font_color="#566573")
+
     fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title="남편 나이",
                       yaxis_title="월 금액(만원)", hovermode="x unified")
     return fig
