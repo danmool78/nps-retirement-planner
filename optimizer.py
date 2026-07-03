@@ -143,7 +143,9 @@ def evaluate_all(
             "inflation": strat.inflation_rate,
             "h_life": strat.husband_life,
             "w_life": strat.wife_life,
-            **sc.metrics,
+            # 조합표에는 스칼라 지표만(연말자산 배열 등 무거운/MC 전용 키는 제외).
+            **{k: v for k, v in sc.metrics.items()
+               if k not in ("assets_yearly", "start_age_h", "house_bequest")},
         }
         if robust:
             rec["worst_infl_shortfall"] = _worst_inflation_shortfall(user, cfg, strat)

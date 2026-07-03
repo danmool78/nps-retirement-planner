@@ -290,6 +290,31 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
     return fig
 
 
+# 몬테카를로 변동성 팬차트 ---------------------------------------------------
+def fig_montecarlo_fan(mc) -> go.Figure:
+    """
+    투자수익 변동성 시뮬레이션의 '나이별 자산 분위(p10/p50/p90)' 팬차트.
+    p10~p90 밴드가 넓을수록 변동성 위험이 큼. p10이 0에 닿으면 하위 10% 경로에서 자산 고갈.
+    """
+    ages = mc["ages"]
+    p10 = [v / _MAN for v in mc["assets_p10"]]
+    p50 = [v / _MAN for v in mc["assets_p50"]]
+    p90 = [v / _MAN for v in mc["assets_p90"]]
+    fig = go.Figure()
+    # p90 상단 → p10 하단으로 채워 밴드 표현.
+    fig.add_trace(go.Scatter(x=ages, y=p90, mode="lines", line=dict(width=0),
+                             name="상위 10%(p90)", showlegend=True))
+    fig.add_trace(go.Scatter(x=ages, y=p10, mode="lines", fill="tonexty",
+                             fillcolor="rgba(46,134,222,0.15)", line=dict(width=0),
+                             name="하위 10%(p10)"))
+    fig.add_trace(go.Scatter(x=ages, y=p50, mode="lines",
+                             line=dict(color="#2E86DE", width=2.5), name="중앙값(p50)"))
+    fig.update_layout(
+        title=f"변동성 스트레스: 나이별 자산 분위 (변동성 {mc['volatility']*100:.0f}%, {mc['n_sims']}회)",
+        xaxis_title="남편 나이", yaxis_title="금융자산(만원)", hovermode="x unified")
+    return fig
+
+
 # 조합별 점수 산점도 ----------------------------------------------------------
 def _combo_label(row) -> str:
     """한 조합의 수령개시 조건 텍스트(국민연금 나이 / 주택연금 나이)."""

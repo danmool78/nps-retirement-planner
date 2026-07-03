@@ -23,6 +23,7 @@ import nps
 import pension
 import housing_pension as hp
 import optimizer as opt
+import montecarlo as mc
 import visualization as viz
 import export
 from cashflow import simulate, build_strategy_from_user
@@ -108,6 +109,13 @@ GRAPH_GUIDES = {
 - **👍/👎** = 다른 조합 대비 자동으로 뽑은 장단점.
 - 맨 위(1위)가 그 관점의 추천안이며, 아래 그래프는 **안정형 1위**를 기준으로 그려집니다.
 """,
+    "montecarlo": """
+**투자 변동성 스트레스(몬테카를로)** — 수익률을 매년 무작위로 흔들어 수백 번 시뮬레이션.
+- **성공확률** = 부족 없이 끝까지 버틴 경로 비율. 높을수록 안전(보통 80%+ 목표).
+- **팬차트**: 파란 밴드 = 하위10%~상위10% 자산 범위, 진한 선 = 중앙값(p50).
+- **하위10%(p10) 선이 0에 닿으면** 운 나쁜 경우(초반 폭락 등) 그 나이에 자산 고갈.
+- 밴드가 넓을수록 변동성 위험이 큽니다. 변동성(%)을 올려보면 위험이 커지는 걸 확인할 수 있어요.
+""",
     "margin": """
 **물가 안전 마진 읽는 법** — 물가는 예측이 불가하므로, 추천 전략이 "물가가 얼마까지 올라도
 생활비 부족이 없는지"로 안전성을 봅니다.
@@ -150,6 +158,8 @@ def compute_pipeline(user: UserInput, cfg: Config) -> dict:
         "best_id": best_id,
         "best_scenario": simulate(user, best_strat, cfg, record=True),
         "margin": opt.inflation_safety_margin(user, cfg, best_strat),
+        "montecarlo": mc.run(user, best_strat, cfg, user.investment_volatility,
+                             n_sims=cfg.optimizer.mc_sims),
         "life_df": opt.best_strategy_by_life(user, cfg, "stable"),
         "housing_df": opt.shortfall_by_housing_age(user, cfg) if user.use_housing_pension else None,
         "inflation_df": opt.shortfall_by_inflation(user, cfg),
@@ -212,6 +222,8 @@ def build_inputs():
                                    help="1인 가구 생활비 비율")
     invest = c3.number_input("투자수익률(%)", 0.0, 10.0, 3.0, 0.5) / 100
     inflation = c4.number_input("물가상승률(%)", 0.0, 6.0, 2.0, 0.5) / 100
+    volatility = c3.number_input("투자 변동성(%)", 0.0, 40.0, 10.0, 1.0,
+                                 help="수익률의 연 표준편차. 클수록 폭락 위험 큼(변동성 스트레스에 사용)") / 100
     SURV_MODES = {
         "자동(유리한 쪽 선택)": "auto",
         "본인연금 + 유족 일부": "own_plus",
@@ -290,6 +302,7 @@ def build_inputs():
         living_expense_monthly=living, single_expense_ratio=single_ratio,
         survivor_mode=survivor_mode, basic_pension_eligible=basic_eligible,
         financial_assets=assets, investment_return=invest, inflation_rate=inflation,
+        investment_volatility=volatility,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
         use_housing_pension=use_house, retirement_age=retire_age,
@@ -404,6 +417,20 @@ def main():
     st.caption("물가는 예측이 불가하므로, 이 전략이 **물가가 얼마까지 올라도 부족이 없는지**로 안전성을 봅니다.")
     guide("margin")
 
+    # 투자수익 변동성(시퀀스 리스크) 몬테카를로 스트레스.
+    MC = R["montecarlo"]
+    st.subheader("🎲 투자 변동성 스트레스 (몬테카를로)")
+    v1, v2, v3 = st.columns(3)
+    sr = MC["success_rate"] * 100
+    v1.metric("성공확률(부족 없이 버팀)", f"{sr:.0f}%",
+              help=f"변동성 {MC['volatility']*100:.0f}%로 {MC['n_sims']}회 시뮬레이션")
+    v2.metric("자산 고갈 확률", f"{MC['depletion_rate']*100:.0f}%")
+    v3.metric("상속 자산(중앙값)", f"{MC['bequest_p50']/1e8:.2f}억",
+              help=f"하위10% {MC['bequest_p10']/1e8:.2f}억 ~ 상위10% {MC['bequest_p90']/1e8:.2f}억")
+    fig_mc = viz.fig_montecarlo_fan(MC)
+    st.plotly_chart(fig_mc, use_container_width=True)
+    guide("montecarlo")
+
     # 3) 그래프 ---------------------------------------------------------------
     # 각 그래프를 변수로 만들어 화면 표시 + 리포트(report_figs) 수집에 함께 사용.
     st.header("📊 그래프")
@@ -473,7 +500,8 @@ def main():
         except Exception as e:  # 산점도 렌더 실패가 전체 앱을 멈추지 않도록.
             st.warning(f"산점도를 그리는 중 문제가 발생해 건너뜁니다: {e}")
         guide("scatter")
-    report_figs += [("⑧ Pareto Frontier", fig_pa), ("⑨ 조합별 점수 산점도", fig_sc)]
+    report_figs += [("⑧ Pareto Frontier", fig_pa), ("⑨ 조합별 점수 산점도", fig_sc),
+                    ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
 
     # 4) 내보내기 ------------------------------------------------------------
     st.header("💾 내보내기 / 리포트")

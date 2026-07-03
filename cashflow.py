@@ -102,7 +102,8 @@ def _survivor_total(own_pension: float, deceased_pension: float, dead_policy, mo
 # ---------------------------------------------------------------------------
 # 메인 시뮬레이션
 # ---------------------------------------------------------------------------
-def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True) -> Scenario:
+def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
+             annual_returns=None) -> Scenario:
     """
     하나의 전략에 대해 월 단위 현금흐름을 시뮬레이션한다.
 
@@ -123,8 +124,15 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
     w_end_month = max(0, (strat.wife_life - start_age_w) * 12)
     total_months = max(h_end_month, w_end_month)
 
-    # 월 이율.
-    r_invest = monthly_rate(user.investment_return)
+    # 월 이율. annual_returns(연도별 수익률 배열)가 주어지면 그 해의 수익률을 사용(변동성 시뮬).
+    if annual_returns is not None:
+        n_yr = total_months // 12 + 1
+        monthly_rates = [monthly_rate(annual_returns[min(y, len(annual_returns) - 1)])
+                         for y in range(n_yr)]
+        r_invest = None
+    else:
+        r_invest = monthly_rate(user.investment_return)
+        monthly_rates = None
     r_disc = monthly_rate(cfg.optimizer.discount_rate)
     disc_base = 1.0 + r_disc
 
@@ -167,6 +175,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
     survivor_min_net = 0.0
     has_single = False
     depletion_age: Optional[float] = None
+    assets_yearly = []  # 연말 자산 스냅샷(팬차트/몬테카를로용)
 
     rows = [] if record else None
 
@@ -247,7 +256,8 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
 
         # --- 5) 순현금흐름과 자산 갱신 ---
         net = income - expense
-        assets = assets * (1.0 + r_invest) + net  # 월 투자수익 반영 후 순현금 반영
+        rm = r_invest if r_invest is not None else monthly_rates[year_idx]
+        assets = assets * (1.0 + rm) + net  # 월 투자수익 반영 후 순현금 반영
 
         shortfall = 0.0
         if assets < 0:
@@ -255,6 +265,10 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
             assets = 0.0
             if depletion_age is None:
                 depletion_age = round(h_age, 1)
+
+        # 연말 자산 스냅샷(몬테카를로 팬차트용, 표 생성과 무관하게 항상 수집).
+        if (m + 1) % 12 == 0:
+            assets_yearly.append(assets)
 
         # --- 지표 누적 (실수령 기준) ---
         total_nominal += income
@@ -295,6 +309,9 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True)
         "bequest": assets + house_bequest,
         "survivor_min_net": survivor_min_net,
         "final_assets": assets,
+        "house_bequest": house_bequest,
+        "assets_yearly": assets_yearly,
+        "start_age_h": start_age_h,
     }
     frame = pd.DataFrame(rows) if record else pd.DataFrame()
     return Scenario(strategy=strat, frame=frame, metrics=metrics)

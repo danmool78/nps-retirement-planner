@@ -207,6 +207,9 @@ class OptimizerConfig:
     margin_max_inflation: float = 0.08
     margin_step: float = 0.0025
 
+    # 몬테카를로(투자 변동성) 시뮬레이션 횟수.
+    mc_sims: int = 400
+
     # 탐색할 기대수명 시나리오.
     life_expectancy_scenarios: List[int] = field(default_factory=lambda: [83, 88, 93])
 
@@ -325,6 +328,8 @@ class UserInput:
     # 금융자산(현재 보유, 원)과 기대 연 투자수익률.
     financial_assets: float = 200_000_000
     investment_return: float = 0.03
+    # 투자수익률의 연 변동성(표준편차). 몬테카를로 변동성 스트레스에 사용.
+    investment_volatility: float = 0.10
 
     # 물가상승률(기본 시나리오). 민감도 분석은 OptimizerConfig 에서 별도 탐색.
     inflation_rate: float = 0.02
