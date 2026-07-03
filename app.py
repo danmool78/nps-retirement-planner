@@ -504,7 +504,8 @@ def main():
                     ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
 
     # 4) 내보내기 ------------------------------------------------------------
-    st.header("💾 내보내기 / 리포트")
+    st.divider()
+    st.subheader("내보내기")
 
     # --- 전체 리포트(입력요약·표·그래프 전부)를 담은 HTML → 브라우저에서 PDF 저장 ---
     if margin is None:
@@ -540,23 +541,22 @@ def main():
         ],
     }
     report_bytes = export.build_html_report(report_figs, tops, summary)
-    st.download_button(
-        "📄 전체 리포트 다운로드 (그래프·표 포함)",
-        report_bytes, "노후자금리포트.html", "text/html", type="primary",
-    )
-    st.caption("내려받은 파일을 열고 **Ctrl+P → '대상: PDF로 저장'** 하면 한글·그래프 그대로 PDF가 됩니다.")
 
-    e1, e2 = st.columns(2)
+    # 세 개 다운로드 버튼을 한 줄에 나란히 배치(정돈).
+    e1, e2, e3 = st.columns(3)
     with e1:
-        st.download_button("CSV 다운로드(전체 조합)", export.to_csv_bytes(df),
-                           "nps_result.csv", "text/csv")
+        st.download_button("전체 리포트 (PDF용)", report_bytes,
+                           "노후자금리포트.html", "text/html",
+                           type="primary", use_container_width=True)
     with e2:
-        st.download_button(
-            "Excel 다운로드(요약+월별표)",
-            export.to_excel_bytes(df, best_scenario),
-            "nps_result.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        st.download_button("CSV (전체 조합)", export.to_csv_bytes(df),
+                           "nps_result.csv", "text/csv", use_container_width=True)
+    with e3:
+        st.download_button("Excel (요약+월별)", export.to_excel_bytes(df, best_scenario),
+                           "nps_result.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True)
+    st.caption("전체 리포트 파일을 열고 **Ctrl+P → '대상: PDF로 저장'** 하면 한글·그래프 그대로 PDF가 됩니다.")
 
 
 if __name__ == "__main__":

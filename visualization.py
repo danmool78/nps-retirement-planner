@@ -279,10 +279,10 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
         ))
         fig.add_annotation(
             x=bx, y=by,
-            text=f"⭐ 추천: 부족 0 + 최대수령<br>국민 {int(b['h_claim'])}/{int(b['w_claim'])}세 · {housing}",
+            text=f"★ 추천: 부족 0 + 최대수령<br>국민 {int(b['h_claim'])}/{int(b['w_claim'])}세 · {housing}",
             showarrow=True, arrowhead=2, ax=30, ay=40,
-            font=dict(size=11, color="#B7950B"), bgcolor="rgba(255,255,255,0.75)",
-            bordercolor="#F1C40F", borderwidth=1,
+            font=dict(size=12, color="#1A1A1A"), bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="#F1C40F", borderwidth=2, borderpad=4,
         )
     fig.update_layout(title="⑧ Pareto Frontier (총수령액↑ · 부족액↓)",
                       xaxis_title="총수령액 현재가치(만원)",
@@ -361,10 +361,11 @@ def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
                         line=dict(width=1.5, color="black")),
             text=[label], hovertemplate="추천: %{text}<extra></extra>",
         ))
-        fig.add_annotation(x=bx, y=by, text=f"⭐ 추천: {label}",
+        fig.add_annotation(x=bx, y=by, text=f"★ 추천: {label}",
                            showarrow=True, arrowhead=2, ax=0, ay=-35,
-                           font=dict(size=12, color="#B7950B"),
-                           bgcolor="rgba(255,255,255,0.7)")
+                           font=dict(size=12, color="#1A1A1A"),
+                           bgcolor="rgba(255,255,255,0.95)",
+                           bordercolor="#F1C40F", borderwidth=2, borderpad=4)
 
     fig.update_layout(title=f"⑨ 조합별 점수 산점도 ({view})",
                       xaxis_title="총수령액 현재가치(만원)", yaxis_title="잔여자산(만원)")
