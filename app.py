@@ -206,10 +206,13 @@ def build_inputs():
         h_life = st.number_input("기대수명", 70, 110, 86, key="hl")
         # 추납/임의가입은 국민연금 전용 → 직역연금(교직원·공무원)이면 비활성화.
         h_dbtype = h_ptype != "nps"
-        h_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype)
-        h_chunap_c = st.number_input("추납 총비용(만원)", 0, 20_000, 0, 100,
-                                     key="hcc", disabled=h_dbtype,
-                                     help="한 번에 내는 전체 금액(월납 아님). 시작 시 금융자산에서 차감") * 10_000
+        h_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="hcy", disabled=h_dbtype,
+                                     help="추납으로 메우는 가입연수(연금 증가를 결정)")
+        h_premium = st.number_input("월 보험료(만원)", 0, 60, 25, 1, key="hpm", disabled=h_dbtype,
+                                    help="소득의 9%. 추납 총비용=기간×12×월보험료로 자동 계산") * 10_000
+        h_chunap_c = h_chunap_y * 12 * h_premium  # 추납 총비용 자동 계산
+        if h_chunap_y > 0 and not h_dbtype:
+            st.caption(f"추납비용 ≈ {h_chunap_c/1e4:,.0f}만원")
     with c2:
         st.markdown("**아내**")
         w_ptype = PENSION_TYPES[st.selectbox("연금종류", list(PENSION_TYPES),
@@ -220,10 +223,13 @@ def build_inputs():
                                       key="wpp", help="지금까지 납입한 총 보험료") * 10_000
         w_life = st.number_input("기대수명", 70, 110, 90, key="wl")
         w_dbtype = w_ptype != "nps"
-        w_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype)
-        w_chunap_c = st.number_input("추납 총비용(만원)", 0, 20_000, 0, 100,
-                                     key="wcc", disabled=w_dbtype,
-                                     help="한 번에 내는 전체 금액(월납 아님). 시작 시 금융자산에서 차감") * 10_000
+        w_chunap_y = st.number_input("추납기간(년)", 0, 20, 0, key="wcy", disabled=w_dbtype,
+                                     help="추납으로 메우는 가입연수(연금 증가를 결정)")
+        w_premium = st.number_input("월 보험료(만원)", 0, 60, 25, 1, key="wpm", disabled=w_dbtype,
+                                    help="소득의 9%. 추납 총비용=기간×12×월보험료로 자동 계산") * 10_000
+        w_chunap_c = w_chunap_y * 12 * w_premium  # 추납 총비용 자동 계산
+        if w_chunap_y > 0 and not w_dbtype:
+            st.caption(f"추납비용 ≈ {w_chunap_c/1e4:,.0f}만원")
 
     st.sidebar.divider()
     st.sidebar.markdown("### 생활·자산")
