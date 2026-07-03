@@ -147,37 +147,51 @@ class OptimizerConfig:
     # 현재가치 환산에 쓰는 할인율(실질 시간선호). 물가상승률과 별개로 둔다.
     discount_rate: float = 0.02
 
-    # 탐색할 물가상승률 시나리오(민감도 분석용).
+    # 탐색할 물가상승률 시나리오(민감도 분석용, 그래프⑥).
     inflation_scenarios: List[float] = field(default_factory=lambda: [0.01, 0.02, 0.03])
+
+    # 로버스트(robust) 평가용 물가 스트레스 시나리오.
+    # 물가는 예측 불가하므로, 각 전략을 이 물가들에서 모두 돌려 '최악 물가 부족액'을 평가한다.
+    robust_inflations: List[float] = field(
+        default_factory=lambda: [0.01, 0.02, 0.03, 0.04, 0.05]
+    )
+
+    # 물가 안전 마진 탐색 범위(0%~상한, step 간격). 부족이 처음 생기는 물가를 찾는다.
+    margin_max_inflation: float = 0.08
+    margin_step: float = 0.0025
 
     # 탐색할 기대수명 시나리오.
     life_expectancy_scenarios: List[int] = field(default_factory=lambda: [83, 88, 93])
 
     # 세 가지 관점별 점수 가중치.
-    # 각 관점은 [부족액총합, 부족개월수, 최악부족액, 총수령액PV, 잔여자산] 5개 지표에 대한 가중치.
+    # 지표: [부족액총합, 부족개월수, 최악부족액, 최악물가부족액(robust), 총수령액PV, 잔여자산].
     # 부족 관련 지표는 '작을수록 좋음'이므로 정규화 시 부호를 반전한다(optimizer.py 참고).
+    # worst_infl_shortfall(최악 물가에서의 부족)이 없으면 score()가 자동으로 가중치를 재정규화한다.
     weights: Dict[str, Dict[str, float]] = field(
         default_factory=lambda: {
-            "stable": {       # 안정형: 현금흐름 부족 최소화 우선
-                "shortfall_total": 0.35,
-                "shortfall_months": 0.25,
-                "worst_shortfall": 0.20,
+            "stable": {       # 안정형: 현금흐름 부족 최소화 + 물가 로버스트 우선
+                "shortfall_total": 0.30,
+                "shortfall_months": 0.15,
+                "worst_shortfall": 0.15,
+                "worst_infl_shortfall": 0.20,
                 "total_pv": 0.10,
                 "bequest": 0.10,
             },
             "maximize": {     # 총수령액 극대화형
-                "shortfall_total": 0.15,
-                "shortfall_months": 0.10,
-                "worst_shortfall": 0.10,
-                "total_pv": 0.50,
+                "shortfall_total": 0.10,
+                "shortfall_months": 0.05,
+                "worst_shortfall": 0.05,
+                "worst_infl_shortfall": 0.10,
+                "total_pv": 0.55,
                 "bequest": 0.15,
             },
             "bequest": {      # 상속중시형
-                "shortfall_total": 0.15,
-                "shortfall_months": 0.10,
-                "worst_shortfall": 0.10,
+                "shortfall_total": 0.10,
+                "shortfall_months": 0.05,
+                "worst_shortfall": 0.05,
+                "worst_infl_shortfall": 0.10,
                 "total_pv": 0.15,
-                "bequest": 0.50,
+                "bequest": 0.55,
             },
         }
     )

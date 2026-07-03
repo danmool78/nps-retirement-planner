@@ -94,6 +94,60 @@ def fig_nps_by_claim_age(df: pd.DataFrame, label: str = "남편") -> go.Figure:
     return fig
 
 
+# 3-b) 나이별 누적 수령액 + 원금확보 시점(선 그래프) -------------------------
+def fig_cumulative_receipts(curves, principal, breakevens, death, reps, label="남편") -> go.Figure:
+    """
+    수령개시나이별 '나이에 따른 누적 수령액' 선 그래프.
+
+    - 가로 빨간 점선 = 납입원금. 곡선이 이 선을 넘는 지점이 '원금확보(손익분기)'.
+    - 세로 회색 점선 = 기대수명(그래프 우측 끝). 원금확보~기대수명 구간이 '이득 구간'.
+    - 각 곡선의 원금확보 지점에 마커와 '원금확보 XX세·이득 YY년' 주석을 표시.
+    원금확보가 기대수명보다 충분히 이르게(중간쯤) 올수록 이득 기간이 길다.
+    """
+    palette = ["#27AE60", "#2E86DE", "#E67E22", "#8E44AD"]
+    fig = go.Figure()
+
+    for i, ca in enumerate(reps):
+        sub = curves[curves["claim_age"] == ca]
+        color = palette[i % len(palette)]
+        fig.add_trace(go.Scatter(
+            x=sub["age"], y=sub["cumulative"] / _MAN,
+            mode="lines", name=f"{ca}세 개시", line=dict(color=color, width=2),
+        ))
+        # 원금확보 지점 마커 + 주석(이득 기간 = 기대수명 - 원금확보나이).
+        be = breakevens.get(ca)
+        if be is not None:
+            profit_years = max(0, death - be)
+            fig.add_trace(go.Scatter(
+                x=[be], y=[principal / _MAN], mode="markers",
+                marker=dict(color=color, size=11, symbol="circle",
+                            line=dict(width=1.5, color="white")),
+                showlegend=False,
+            ))
+            fig.add_annotation(
+                x=be, y=principal / _MAN,
+                text=f"{ca}세개시→원금확보 {be}세·이득 {profit_years}년",
+                showarrow=True, arrowhead=2, ax=0, ay=-30 - i * 18,
+                font=dict(size=10, color=color),
+            )
+
+    # 납입원금 수평선.
+    if principal > 0:
+        fig.add_hline(y=principal / _MAN, line_dash="dash", line_color="#C0392B",
+                      annotation_text=f"납입원금 {principal/_MAN:,.0f}만원",
+                      annotation_position="bottom right")
+    # 기대수명 수직선(그래프 우측 끝).
+    fig.add_vline(x=death, line_dash="dot", line_color="gray",
+                  annotation_text=f"기대수명 {death}세", annotation_position="top left")
+
+    fig.update_layout(
+        title=f"③ 나이별 누적 수령액·원금확보 시점 ({label})",
+        xaxis_title="나이", yaxis_title="누적 수령액(만원)",
+        hovermode="x unified",
+    )
+    return fig
+
+
 # 4) 주택연금 개시시점별 부족액 ---------------------------------------------
 def fig_shortfall_by_housing(df: pd.DataFrame) -> go.Figure:
     """주택연금 개시나이별 생활비 부족액총합."""

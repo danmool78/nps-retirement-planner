@@ -162,13 +162,15 @@ def main():
         return
 
     # 1) 조합 전수 평가 + 점수화 --------------------------------------------
-    with st.spinner("조합을 계산 중입니다..."):
+    # robust=True: 각 전략을 여러 물가에서 돌려 '최악 물가 부족액'까지 평가(물가 예측 불가 대비).
+    with st.spinner("조합을 계산 중입니다(물가 스트레스 포함)..."):
         strategies = opt.generate_strategies(user, cfg)
-        df = opt.evaluate_all(user, cfg, strategies)
+        df = opt.evaluate_all(user, cfg, strategies, robust=True)
         df = opt.score(df, cfg)
         pareto = opt.pareto_front(df)
 
-    st.success(f"총 {len(df):,}개 조합 평가 완료.")
+    st.success(f"총 {len(df):,}개 조합 평가 완료 "
+               f"(물가 {', '.join(f'{x*100:.0f}%' for x in cfg.optimizer.robust_inflations)} 스트레스 반영).")
 
     # 2) 3가지 관점 상위 5개 -------------------------------------------------
     tabs = st.tabs(["🛡️ 안정형", "📈 총수령액 극대화형", "🎁 상속중시형"])
@@ -185,6 +187,26 @@ def main():
     best_strat = strategies[int(best_row["id"])]
     best_scenario = simulate(user, best_strat, cfg)
 
+    # 물가 안전 마진: 추천(안정형 1위) 전략이 부족 없이 견디는 최대 물가상승률.
+    st.subheader("🌡️ 추천 전략의 물가 안전 마진")
+    margin = opt.inflation_safety_margin(user, cfg, best_strat)
+    m1, m2, m3 = st.columns(3)
+    if margin is None:
+        m1.metric("물가 안전 마진", "0% 미만", "현재 가정에서도 부족 발생")
+    elif margin >= cfg.optimizer.margin_max_inflation:
+        m1.metric("물가 안전 마진", f"{margin*100:.1f}%+ 안전",
+                  "매우 견고(테스트 상한까지 부족 없음)")
+    else:
+        m1.metric("물가 안전 마진", f"~{margin*100:.1f}%까지 안전",
+                  f"물가 {margin*100:.1f}% 초과 시 부족 시작")
+    m2.metric("현재 가정 물가", f"{user.inflation_rate*100:.1f}%")
+    worst_infl_sf = best_row.get("worst_infl_shortfall", float("nan"))
+    if worst_infl_sf == worst_infl_sf:  # NaN 체크
+        m3.metric("최악 물가 부족액",
+                  "없음" if worst_infl_sf <= 0 else f"{worst_infl_sf/1e8:.2f}억",
+                  help=f"물가 {', '.join(f'{x*100:.0f}%' for x in cfg.optimizer.robust_inflations)} 중 최악")
+    st.caption("물가는 예측이 불가하므로, 이 전략이 **물가가 얼마까지 올라도 부족이 없는지**로 안전성을 봅니다.")
+
     # 3) 그래프 8종 ----------------------------------------------------------
     st.header("📊 그래프")
     g1, g2 = st.columns(2)
@@ -193,16 +215,20 @@ def main():
     with g2:
         st.plotly_chart(viz.fig_cumulative_assets(best_scenario), use_container_width=True)
 
-    # ③ 수령시점별 총수령액·원금확보 시점 — 남편/아내 각각(연금 제도 자동 반영).
+    # ③ 나이별 누적 수령액·원금확보 시점 — 남편/아내 각각(기대수명까지 그림).
     g3, g3b = st.columns(2)
     with g3:
         h_lbl = f"남편·{pension.type_label(user.husband)}"
-        h_recv = opt.nps_receipts_by_claim_age(user, cfg, "husband")
-        st.plotly_chart(viz.fig_nps_by_claim_age(h_recv, h_lbl), use_container_width=True)
+        h_curves, h_prin, h_be, h_death, h_reps = opt.cumulative_receipts_curves(user, cfg, "husband")
+        st.plotly_chart(
+            viz.fig_cumulative_receipts(h_curves, h_prin, h_be, h_death, h_reps, h_lbl),
+            use_container_width=True)
     with g3b:
         w_lbl = f"아내·{pension.type_label(user.wife)}"
-        w_recv = opt.nps_receipts_by_claim_age(user, cfg, "wife")
-        st.plotly_chart(viz.fig_nps_by_claim_age(w_recv, w_lbl), use_container_width=True)
+        w_curves, w_prin, w_be, w_death, w_reps = opt.cumulative_receipts_curves(user, cfg, "wife")
+        st.plotly_chart(
+            viz.fig_cumulative_receipts(w_curves, w_prin, w_be, w_death, w_reps, w_lbl),
+            use_container_width=True)
 
     g4, g5 = st.columns(2)
     with g4:

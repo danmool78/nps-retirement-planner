@@ -17,7 +17,7 @@ optimizer.py
 from __future__ import annotations
 
 import itertools
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -105,10 +105,28 @@ def generate_strategies(
 # ---------------------------------------------------------------------------
 # 2. 전수 평가
 # ---------------------------------------------------------------------------
-def evaluate_all(user: UserInput, cfg: Config, strategies: List[Strategy]) -> pd.DataFrame:
+def _worst_inflation_shortfall(user: UserInput, cfg: Config, strat: Strategy) -> float:
+    """
+    한 전략을 여러 물가 스트레스 시나리오에서 돌려 '최악 물가에서의 부족액총합'을 반환.
+    물가는 예측 불가하므로, 어떤 물가가 와도 견디는지를 이 값으로 평가한다(로버스트).
+    """
+    worst = 0.0
+    for infl in cfg.optimizer.robust_inflations:
+        stressed = Strategy(**{**strat.__dict__, "inflation_rate": infl})
+        sc = simulate(user, stressed, cfg)
+        worst = max(worst, sc.metrics["shortfall_total"])
+    return worst
+
+
+def evaluate_all(
+    user: UserInput, cfg: Config, strategies: List[Strategy], robust: bool = False
+) -> pd.DataFrame:
     """
     모든 전략을 시뮬레이션하고 지표를 하나의 DataFrame 으로 모은다.
     각 행은 하나의 조합이며, scenario 객체 참조를 함께 보관한다.
+
+    robust=True 이면 각 전략을 물가 스트레스 시나리오들에서도 돌려
+    'worst_infl_shortfall'(최악 물가 부족액) 컬럼을 추가한다.
     """
     records = []
     scenarios: List[Scenario] = []
@@ -128,11 +146,35 @@ def evaluate_all(user: UserInput, cfg: Config, strategies: List[Strategy]) -> pd
             "w_life": strat.wife_life,
             **sc.metrics,
         }
+        if robust:
+            rec["worst_infl_shortfall"] = _worst_inflation_shortfall(user, cfg, strat)
         records.append(rec)
 
     df = pd.DataFrame(records)
     df.attrs["scenarios"] = scenarios  # 시나리오 객체를 DataFrame 에 부착(그래프에서 재사용)
     return df
+
+
+def inflation_safety_margin(user: UserInput, cfg: Config, strat: Strategy) -> Optional[float]:
+    """
+    물가 안전 마진: 생활비 부족이 '처음 발생하기 직전'까지 견디는 최대 물가상승률.
+
+    0% 부터 상한(margin_max_inflation)까지 step 간격으로 올리며 부족이 없는 마지막 물가를 찾는다.
+    - 0% 에서도 이미 부족이면 None(현재도 안전하지 않음).
+    - 상한까지 부족이 없으면 상한값 반환(그 이상도 안전 가능).
+    """
+    cfgo = cfg.optimizer
+    last_safe: Optional[float] = None
+    infl = 0.0
+    while infl <= cfgo.margin_max_inflation + 1e-9:
+        stressed = Strategy(**{**strat.__dict__, "inflation_rate": infl})
+        sc = simulate(user, stressed, cfg)
+        if sc.metrics["shortfall_total"] <= 0:
+            last_safe = infl
+        else:
+            break  # 부족이 생기기 시작하면 더 높은 물가는 볼 필요 없음(단조 증가 가정)
+        infl += cfgo.margin_step
+    return last_safe
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +205,15 @@ def score(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     norm["worst_shortfall"] = _normalize(out["worst_shortfall"], higher_is_better=False)
     norm["total_pv"] = _normalize(out["total_pv"], higher_is_better=True)
     norm["bequest"] = _normalize(out["bequest"], higher_is_better=True)
+    # 로버스트 평가가 있으면(evaluate_all robust=True) 최악 물가 부족액도 정규화에 포함.
+    if "worst_infl_shortfall" in out.columns:
+        norm["worst_infl_shortfall"] = _normalize(out["worst_infl_shortfall"], higher_is_better=False)
 
     for view, weights in cfg.optimizer.weights.items():
-        out[f"score_{view}"] = sum(norm[k] * w for k, w in weights.items())
+        # 현재 존재하는 지표에 대해서만 가중치를 적용하고, 합이 1이 되도록 재정규화한다.
+        avail = {k: w for k, w in weights.items() if k in norm.columns}
+        total_w = sum(avail.values()) or 1.0
+        out[f"score_{view}"] = sum(norm[k] * (w / total_w) for k, w in avail.items())
 
     return out
 
@@ -234,6 +282,13 @@ def explain(row: pd.Series, df: pd.DataFrame) -> str:
     if row.get("depletion_age") is not None and not pd.isna(row.get("depletion_age")):
         cons.append(f"{row['depletion_age']:.0f}세경 금융자산 고갈")
 
+    # 물가 로버스트: 최악 물가에서도 부족이 없으면 큰 장점.
+    if "worst_infl_shortfall" in row and not pd.isna(row.get("worst_infl_shortfall")):
+        if row["worst_infl_shortfall"] <= 0:
+            pros.append("최악 물가에서도 부족 없음(물가 안전)")
+        elif row["worst_infl_shortfall"] >= df["worst_infl_shortfall"].quantile(0.75):
+            cons.append("고물가에 취약")
+
     pro_txt = " / ".join(pros) if pros else "특별한 강점 없음"
     con_txt = " / ".join(cons) if cons else "뚜렷한 단점 없음"
     return f"👍 {pro_txt}  ｜  👎 {con_txt}"
@@ -287,6 +342,48 @@ def nps_receipts_by_claim_age(user: UserInput, cfg: Config, which: str = "husban
             "breakeven_age": be_age,
         })
     return pd.DataFrame(rows)
+
+
+def cumulative_receipts_curves(user: UserInput, cfg: Config, which: str = "husband"):
+    """
+    수령개시나이별 '나이에 따른 누적 수령액' 곡선을 계산.
+    그래프3(원금확보 시점 시각화)용. X축은 개시나이부터 '기대수명'까지 그린다.
+
+    반환
+    - curves : long DataFrame(claim_age, age, cumulative)
+    - principal : 납입원금
+    - breakevens : {claim_age: 원금확보 나이 or None}
+    - death : 기대수명(그래프 우측 끝)
+    - reps : 그린 대표 개시나이 목록(조기/정상/연기)
+
+    대표 개시나이만 그려 가독성을 확보한다(전체를 다 그리면 곡선이 겹쳐 알아보기 어려움).
+    """
+    person = user.husband if which == "husband" else user.wife
+    death = user.husband_life_expectancy if which == "husband" else user.wife_life_expectancy
+    module, policy = pension.resolve(person, cfg)
+    principal = getattr(person, "paid_principal", 0.0)
+
+    ages = _claim_age_range(person, cfg)
+    normal = module.normal_start_age(person.birth_year, policy)
+    # 대표 개시나이: 조기 최대(가장 이른) · 정상 · 연기 최대(가장 늦은).
+    reps = sorted({ages[0], normal, ages[-1]})
+
+    rows = []
+    breakevens = {}
+    for ca in reps:
+        base = module.monthly_pension(person, ca, policy)
+        cumulative = 0.0
+        be = None
+        rows.append({"claim_age": ca, "age": ca, "cumulative": 0.0})  # 시작점(0원)
+        for y in range(0, death - ca):
+            cumulative += module.indexed_monthly_pension(base, y, user.inflation_rate, policy) * 12
+            age = ca + y + 1  # 해당 연차 말의 나이
+            rows.append({"claim_age": ca, "age": age, "cumulative": cumulative})
+            if be is None and principal > 0 and cumulative >= principal:
+                be = age
+        breakevens[ca] = be
+
+    return pd.DataFrame(rows), principal, breakevens, death, reps
 
 
 def shortfall_by_housing_age(user: UserInput, cfg: Config) -> pd.DataFrame:
