@@ -311,7 +311,7 @@ def render_view_table(top, view: str, df, title: str):
 
 
 def main():
-    st.title("👴👵 부부 노후자금 통합 시뮬레이터")
+    st.title("부부 노후자금 통합 시뮬레이터")
     st.caption("국민연금·교직원연금·공무원연금·주택연금·추납·임의가입·물가·기대수명을 통합해 월 단위 현금흐름을 시뮬레이션합니다.")
 
     user, cfg = build_inputs()

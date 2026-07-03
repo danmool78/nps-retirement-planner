@@ -117,7 +117,7 @@ def build_html_report(figs, tops: dict, summary: dict) -> bytes:
     plotly.js 를 인라인으로 넣어 인터넷 없이도 열리며, 브라우저에서 인쇄(Ctrl+P) →
     'PDF로 저장'하면 한글·그래프가 그대로 보존된 PDF가 만들어진다.
     """
-    parts = [f"<h1>👴👵 부부 노후자금 시뮬레이션 리포트</h1>",
+    parts = [f"<h1>부부 노후자금 시뮬레이션 리포트</h1>",
              f"<p class='meta'>작성일: {date.today().isoformat()} · "
              f"평가 조합 수: {summary.get('n_combos', 0):,}개 · {summary.get('normal_ages','')}</p>"]
 
