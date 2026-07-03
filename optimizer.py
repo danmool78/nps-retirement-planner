@@ -296,7 +296,8 @@ def explain(row: pd.Series, df: pd.DataFrame) -> str:
 # ---------------------------------------------------------------------------
 # 6. 민감도 분석 헬퍼(그래프용)
 # ---------------------------------------------------------------------------
-def _breakeven_age(module, person, claim_age, policy, inflation, principal, max_age=110):
+def _breakeven_age(module, person, claim_age, policy, inflation, principal,
+                   use_chunap=False, use_voluntary=False, max_age=110):
     """
     원금확보(손익분기) 나이 계산.
 
@@ -306,7 +307,7 @@ def _breakeven_age(module, person, claim_age, policy, inflation, principal, max_
     """
     if principal <= 0:
         return None
-    base = module.monthly_pension(person, claim_age, policy)
+    base = module.monthly_pension(person, claim_age, policy, use_chunap, use_voluntary)
     cumulative = 0.0
     for y in range(0, max_age - claim_age):
         cumulative += module.indexed_monthly_pension(base, y, inflation, policy) * 12
@@ -327,12 +328,14 @@ def nps_receipts_by_claim_age(user: UserInput, cfg: Config, which: str = "husban
     death = user.husband_life_expectancy if which == "husband" else user.wife_life_expectancy
     module, policy = pension.resolve(person, cfg)
     principal = getattr(person, "paid_principal", 0.0)
+    uc = person.chunap_years > 0       # 추납 반영
+    uv = person.voluntary_years > 0    # 임의가입 반영
     ages = _claim_age_range(person, cfg)
     rows = []
     for age in ages:
-        monthly = module.monthly_pension(person, age, policy)
-        total = module.total_nominal_receipts(person, age, death, user.inflation_rate, policy)
-        be_age = _breakeven_age(module, person, age, policy, user.inflation_rate, principal)
+        monthly = module.monthly_pension(person, age, policy, uc, uv)
+        total = module.total_nominal_receipts(person, age, death, user.inflation_rate, policy, uc, uv)
+        be_age = _breakeven_age(module, person, age, policy, user.inflation_rate, principal, uc, uv)
         rows.append({
             "claim_age": age,
             "monthly": monthly,
@@ -362,6 +365,8 @@ def cumulative_receipts_curves(user: UserInput, cfg: Config, which: str = "husba
     death = user.husband_life_expectancy if which == "husband" else user.wife_life_expectancy
     module, policy = pension.resolve(person, cfg)
     principal = getattr(person, "paid_principal", 0.0)
+    uc = person.chunap_years > 0       # 추납 반영
+    uv = person.voluntary_years > 0    # 임의가입 반영
 
     ages = _claim_age_range(person, cfg)
     normal = module.normal_start_age(person.birth_year, policy)
@@ -372,7 +377,7 @@ def cumulative_receipts_curves(user: UserInput, cfg: Config, which: str = "husba
     breakevens = {}
     monthlies = {}
     for ca in reps:
-        base = module.monthly_pension(person, ca, policy)
+        base = module.monthly_pension(person, ca, policy, uc, uv)
         monthlies[ca] = base  # 개시시점 월수령액(명목)
         cumulative = 0.0
         be = None
