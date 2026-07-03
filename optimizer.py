@@ -75,9 +75,10 @@ def generate_strategies(
         start = cfg.housing.min_start_age
         housing_ages = list(range(start, user.retirement_age + 16, 3))
 
-    # 추납/임의가입은 '입력이 있을 때만' on/off 두 경우를 탐색.
-    chunap_opts = [False, True] if (user.husband.chunap_years or user.wife.chunap_years) else [False]
-    vol_opts = [False, True] if (user.husband.voluntary_years or user.wife.voluntary_years) else [False]
+    # 추납/임의가입은 '사용자가 입력하면 항상 적용'(가입 결정은 사용자 몫).
+    # → 모든 그래프·지표에서 일관되게 반영된다.
+    chunap_opts = [True] if (user.husband.chunap_years or user.wife.chunap_years) else [False]
+    vol_opts = [True] if (user.husband.voluntary_years or user.wife.voluntary_years) else [False]
     housing_opts = [(False, 0)]  # 주택연금 미사용
     if user.use_housing_pension:
         housing_opts += [(True, a) for a in housing_ages]
