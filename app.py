@@ -238,6 +238,10 @@ def build_inputs():
     inflation = c4.number_input("물가상승률(%)", 0.0, 6.0, 2.0, 0.5) / 100
     volatility = c3.number_input("투자 변동성(%)", 0.0, 40.0, 10.0, 1.0,
                                  help="수익률의 연 표준편차. 클수록 폭락 위험 큼(변동성 스트레스에 사용)") / 100
+    other_income = c4.number_input("기타 월소득(만원)", 0, 2_000, 0, 10,
+                                   help="연금 외 근로·임대·이자·개인/퇴직연금 등. 현금흐름과 기초연금 판정에 반영") * 10_000
+    other_income_end = c3.number_input("기타소득 유지나이", 55, 110, 100,
+                                       help="근로소득처럼 끝나면 낮게, 임대·연금이면 높게(평생=100)")
     SURV_MODES = {
         "자동(유리한 쪽 선택)": "auto",
         "본인연금 + 유족 일부": "own_plus",
@@ -327,6 +331,7 @@ def build_inputs():
         survivor_mode=survivor_mode, basic_pension_eligible=True,  # 아래에서 모드에 따라 확정
         financial_assets=assets, investment_return=invest, inflation_rate=inflation,
         investment_volatility=volatility,
+        other_income_monthly=other_income, other_income_end_age=other_income_end,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
         use_housing_pension=use_house, retirement_age=retire_age,
@@ -391,7 +396,8 @@ def estimate_basic_eligibility(user, cfg):
     반환: (소득인정액, 선정기준액, 대상여부)
     """
     bp = cfg.basic
-    pension_income = user.husband.nps_monthly + user.wife.nps_monthly  # 공적연금 소득(월)
+    # 소득평가액(월): 공적연금 + 연금 외 기타소득(근로·임대·이자 등).
+    pension_income = user.husband.nps_monthly + user.wife.nps_monthly + user.other_income_monthly
     general = max(0.0, user.house_value - bp.property_basic_deduction)
     financial = max(0.0, user.financial_assets - bp.financial_deduction)
     property_income = (general + financial) * bp.property_conversion_rate / 12.0
@@ -415,13 +421,14 @@ def income_breakdown_table(frame, ages=(65, 70, 75, 80)):
         row = frame.iloc[(frame["husband_age"] - age).abs().idxmin()]
         gross = row["h_pension"] + row["w_pension"] + row["survivor_pension"]  # 세전 공적연금
         tax = gross - row["net_taxable"]                                       # 세금·건보 차감액
+        other = row.get("other_income", 0.0)
         vals = [gross, -tax, row["net_taxable"],
-                row["basic_pension"], row["house_income"], row["income"]]
+                row["basic_pension"], row["house_income"], other, row["income"]]
         cols[f"{age}세"] = [f"{v:,.0f}원" for v in vals]  # 문자열로 미리 포맷(applymap 회피)
     if not cols:
         return None
     idx = ["공적연금(세전)", "− 세금·건보", "실수령 연금",
-           "+ 기초연금", "+ 주택연금", "= 월 실수령 합계"]
+           "+ 기초연금", "+ 주택연금", "+ 기타소득", "= 월 실수령 합계"]
     return pd.DataFrame(cols, index=idx)
 
 

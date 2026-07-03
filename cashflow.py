@@ -246,8 +246,13 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
             if w_gets:
                 basic_pension += bp_amt * (1.0 - bp.couple_reduction if both_gets else 1.0)
 
-        # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금).
-        income = net_taxable + basic_pension + house_income
+        # --- 3-d) 연금 외 기타소득(근로·임대·이자 등). 물가연동, 지정 나이까지만 ---
+        other_income = 0.0
+        if (h_alive or w_alive) and user.other_income_monthly > 0 and h_age <= user.other_income_end_age:
+            other_income = user.other_income_monthly * ((1.0 + strat.inflation_rate) ** year_idx)
+
+        # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금 + 기타소득).
+        income = net_taxable + basic_pension + house_income + other_income
 
         # --- 4) 생활비(물가상승 반영) ---
         both_alive = h_alive and w_alive
@@ -290,6 +295,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
                 "h_pension": h_pension, "w_pension": w_pension,
                 "survivor_pension": survivor_extra, "basic_pension": basic_pension,
                 "net_taxable": net_taxable, "house_income": house_income,
+                "other_income": other_income,
                 "income": income, "expense": expense, "net": net,
                 "assets": assets, "shortfall": shortfall, "both_alive": both_alive,
             })

@@ -338,6 +338,12 @@ class UserInput:
     # 투자수익률의 연 변동성(표준편차). 몬테카를로 변동성 스트레스에 사용.
     investment_volatility: float = 0.10
 
+    # 연금 외 기타 월소득(근로·임대·이자·배당·개인/퇴직연금 등, 원).
+    # 현금흐름 수입에 더해지고, 기초연금 소득인정액에도 반영된다(물가연동 가정).
+    other_income_monthly: float = 0.0
+    # 기타소득이 유지되는 남편 나이(근로소득처럼 끝나면 낮게, 임대·연금이면 높게/평생).
+    other_income_end_age: int = 100
+
     # 물가상승률(기본 시나리오). 민감도 분석은 OptimizerConfig 에서 별도 탐색.
     inflation_rate: float = 0.02
 
