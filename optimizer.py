@@ -352,6 +352,7 @@ def cumulative_receipts_curves(user: UserInput, cfg: Config, which: str = "husba
     - breakevens : {claim_age: 원금확보 나이 or None}
     - death : 기대수명(그래프 우측 끝)
     - reps : 그린 대표 개시나이 목록(조기/정상/연기)
+    - monthlies : {claim_age: 개시시점 월수령액} — 곡선 라벨에 '월 얼마' 표시용
 
     대표 개시나이만 그려 가독성을 확보한다(전체를 다 그리면 곡선이 겹쳐 알아보기 어려움).
     """
@@ -367,8 +368,10 @@ def cumulative_receipts_curves(user: UserInput, cfg: Config, which: str = "husba
 
     rows = []
     breakevens = {}
+    monthlies = {}
     for ca in reps:
         base = module.monthly_pension(person, ca, policy)
+        monthlies[ca] = base  # 개시시점 월수령액(명목)
         cumulative = 0.0
         be = None
         rows.append({"claim_age": ca, "age": ca, "cumulative": 0.0})  # 시작점(0원)
@@ -380,7 +383,7 @@ def cumulative_receipts_curves(user: UserInput, cfg: Config, which: str = "husba
                 be = age
         breakevens[ca] = be
 
-    return pd.DataFrame(rows), principal, breakevens, death, reps
+    return pd.DataFrame(rows), principal, breakevens, death, reps, monthlies
 
 
 def shortfall_by_housing_age(user: UserInput, cfg: Config) -> pd.DataFrame:

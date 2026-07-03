@@ -52,6 +52,7 @@ GRAPH_GUIDES = {
     "receipts": """
 **③ 나이별 누적 수령액·원금확보 시점** — 연금을 언제부터 받느냐에 따른 누적 수령액.
 - 색선 = 개시나이별(조기/정상/연기) 누적 수령액. 위로 갈수록 많이 받은 것.
+- **범례에 개시나이별 '월 수령액'**(월에 얼마 받는지)이 함께 표시됩니다.
 - 빨간 점선 = **납입원금**. 색선이 이 선을 넘는 점(●)이 **원금확보(손익분기)**.
 - 회색 점선 = **기대수명**. 원금확보 지점부터 기대수명까지가 **이득 구간**.
 - 원금확보가 **일찍(중간쯤 이전)** 올수록 이득 기간이 길어 유리.
@@ -358,16 +359,16 @@ def main():
     g3, g3b = st.columns(2)
     with g3:
         h_lbl = f"남편·{pension.type_label(user.husband)}"
-        h_curves, h_prin, h_be, h_death, h_reps = R["husband_curves"]
+        h_curves, h_prin, h_be, h_death, h_reps, h_mon = R["husband_curves"]
         st.plotly_chart(
-            viz.fig_cumulative_receipts(h_curves, h_prin, h_be, h_death, h_reps, h_lbl),
+            viz.fig_cumulative_receipts(h_curves, h_prin, h_be, h_death, h_reps, h_mon, h_lbl),
             use_container_width=True)
         guide("receipts")
     with g3b:
         w_lbl = f"아내·{pension.type_label(user.wife)}"
-        w_curves, w_prin, w_be, w_death, w_reps = R["wife_curves"]
+        w_curves, w_prin, w_be, w_death, w_reps, w_mon = R["wife_curves"]
         st.plotly_chart(
-            viz.fig_cumulative_receipts(w_curves, w_prin, w_be, w_death, w_reps, w_lbl),
+            viz.fig_cumulative_receipts(w_curves, w_prin, w_be, w_death, w_reps, w_mon, w_lbl),
             use_container_width=True)
         guide("receipts")
 

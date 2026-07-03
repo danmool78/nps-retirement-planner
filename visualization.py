@@ -95,24 +95,30 @@ def fig_nps_by_claim_age(df: pd.DataFrame, label: str = "남편") -> go.Figure:
 
 
 # 3-b) 나이별 누적 수령액 + 원금확보 시점(선 그래프) -------------------------
-def fig_cumulative_receipts(curves, principal, breakevens, death, reps, label="남편") -> go.Figure:
+def fig_cumulative_receipts(curves, principal, breakevens, death, reps, monthlies=None,
+                            label="남편") -> go.Figure:
     """
     수령개시나이별 '나이에 따른 누적 수령액' 선 그래프.
 
+    - 범례에 개시나이별 **월수령액**(월 얼마 받는지)을 함께 표시.
     - 가로 빨간 점선 = 납입원금. 곡선이 이 선을 넘는 지점이 '원금확보(손익분기)'.
     - 세로 회색 점선 = 기대수명(그래프 우측 끝). 원금확보~기대수명 구간이 '이득 구간'.
     - 각 곡선의 원금확보 지점에 마커와 '원금확보 XX세·이득 YY년' 주석을 표시.
     원금확보가 기대수명보다 충분히 이르게(중간쯤) 올수록 이득 기간이 길다.
     """
     palette = ["#27AE60", "#2E86DE", "#E67E22", "#8E44AD"]
+    monthlies = monthlies or {}
     fig = go.Figure()
 
     for i, ca in enumerate(reps):
         sub = curves[curves["claim_age"] == ca]
         color = palette[i % len(palette)]
+        # 범례명에 '월 얼마'를 넣어 개시나이별 월수령액을 바로 보이게 함.
+        mon = monthlies.get(ca)
+        name = f"{ca}세 개시 · 월 {mon/_MAN:,.0f}만원" if mon else f"{ca}세 개시"
         fig.add_trace(go.Scatter(
             x=sub["age"], y=sub["cumulative"] / _MAN,
-            mode="lines", name=f"{ca}세 개시", line=dict(color=color, width=2),
+            mode="lines", name=name, line=dict(color=color, width=2),
         ))
         # 원금확보 지점 마커 + 주석(이득 기간 = 기대수명 - 원금확보나이).
         be = breakevens.get(ca)
