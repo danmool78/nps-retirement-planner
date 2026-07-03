@@ -64,15 +64,26 @@ def to_excel_bytes(summary: pd.DataFrame, scenario: Scenario | None = None) -> b
 # HTML 리포트(브라우저에서 인쇄 → PDF 저장용)
 # ---------------------------------------------------------------------------
 _REPORT_CSS = """
-body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;margin:24px;color:#222;}
-h1{border-bottom:3px solid #2E86DE;padding-bottom:8px;}
-h2{margin-top:28px;color:#1A5276;border-left:5px solid #2E86DE;padding-left:8px;}
-table{border-collapse:collapse;margin:8px 0;font-size:13px;width:100%;}
-th,td{border:1px solid #ccc;padding:6px 8px;text-align:center;}
+/* A4 세로 기준 인쇄 설정 */
+@page{size:A4 portrait;margin:12mm;}
+html,body{margin:0;padding:0;}
+body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#222;
+     -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+/* A4 내용 폭(210mm-여백)에 맞춘 중앙 컨테이너 */
+.page{max-width:186mm;margin:0 auto;padding:6mm;}
+h1{border-bottom:3px solid #2E86DE;padding-bottom:8px;font-size:22px;}
+h2{margin-top:22px;color:#1A5276;border-left:5px solid #2E86DE;padding-left:8px;font-size:17px;}
+h3{font-size:14px;margin:12px 0 4px;}
+table{border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;}
+th,td{border:1px solid #ccc;padding:5px 7px;text-align:center;}
 th{background:#EBF5FB;}
-.meta{color:#555;font-size:13px;}
-.chart{margin:10px 0 26px;}
-@media print{h2{page-break-before:auto;} .chart{page-break-inside:avoid;}}
+.meta{color:#555;font-size:12px;}
+.chart{width:100%;margin:6px 0 18px;page-break-inside:avoid;}
+@media print{
+  h2{page-break-after:avoid;}
+  h3{page-break-after:avoid;}
+  table{page-break-inside:avoid;}
+}
 """
 
 
@@ -124,18 +135,21 @@ def build_html_report(figs, tops: dict, summary: dict) -> bytes:
         if view in tops:
             parts.append(f"<h3>{ko}</h3>{_tops_table_html(tops[view], view)}")
 
-    # 그래프
+    # 그래프 — A4 폭(약 680px)에 맞춰 크기 고정, 한 페이지에 대략 2개씩 들어가도록 높이 조정.
     parts.append("<h2>📊 그래프</h2>")
     for caption, fig in figs:
+        # 인쇄 안정성을 위해 각 그래프에 A4에 맞는 레이아웃 크기를 지정.
+        fig.update_layout(width=680, height=360, margin=dict(l=50, r=30, t=50, b=45),
+                          title_font_size=14, legend_font_size=10)
         chart = pio.to_html(fig, include_plotlyjs=False, full_html=False,
-                            default_width="100%", default_height="430px")
-        parts.append(f"<div class='chart'>{chart}</div>")
+                            default_width="680px", default_height="360px")
+        parts.append(f"<h3>{caption}</h3><div class='chart'>{chart}</div>")
 
+    body = f"<div class='page'>{''.join(parts)}" \
+           f"<p class='meta' style='margin-top:24px'>※ 본 리포트의 연금액은 근사 계산이며 " \
+           f"실제 수급액과 다를 수 있습니다. 저장: 브라우저 Ctrl+P → 대상 'PDF로 저장', " \
+           f"용지 A4·여백 기본·배경 그래픽 켜기 권장.</p></div>"
     html = (f"<!DOCTYPE html><html lang='ko'><head><meta charset='utf-8'>"
             f"<title>노후자금 리포트</title><style>{_REPORT_CSS}</style>"
-            f"<script>{get_plotlyjs()}</script></head><body>"
-            f"{''.join(parts)}"
-            f"<p class='meta' style='margin-top:30px'>※ 본 리포트의 연금액은 근사 계산이며 "
-            f"실제 수급액과 다를 수 있습니다. 저장하려면 브라우저에서 Ctrl+P → 'PDF로 저장'.</p>"
-            f"</body></html>")
+            f"<script>{get_plotlyjs()}</script></head><body>{body}</body></html>")
     return html.encode("utf-8")
