@@ -248,13 +248,46 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
     return fig
 
 
-# 조합별 점수 산점도(보너스) -------------------------------------------------
-def fig_score_scatter(df: pd.DataFrame, view: str = "stable") -> go.Figure:
-    """총수령액 대비 잔여자산 산점도, 색상=관점 점수."""
-    fig = px.scatter(
-        df, x=df["total_pv"] / _MAN, y=df["bequest"] / _MAN,
-        color=df[f"score_{view}"], color_continuous_scale="Viridis",
-        labels=dict(x="총수령액 현재가치(만원)", y="잔여자산(만원)", color="점수"),
-    )
-    fig.update_layout(title=f"조합별 점수 산점도 ({view})")
+# 조합별 점수 산점도 ----------------------------------------------------------
+def _combo_label(row) -> str:
+    """한 조합의 수령개시 조건 텍스트(국민연금 나이 / 주택연금 나이)."""
+    housing = f"주택 {int(row['housing'])}세" if row.get("use_housing") else "주택 미사용"
+    return f"국민 {int(row['h_claim'])}/{int(row['w_claim'])}세 · {housing}"
+
+
+def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
+                      best_id: int | None = None) -> go.Figure:
+    """
+    총수령액(→) 대비 잔여자산(↑) 산점도. 색상=관점 점수(밝을수록 좋음).
+    - 각 점 hover 에 수령개시 조건(국민연금·주택연금 나이) 표시.
+    - best_id 가 주어지면 ⭐추천 조합을 별표로 강조하고 조건을 라벨로 붙인다.
+    """
+    hover = [_combo_label(r) for _, r in df.iterrows()]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["total_pv"] / _MAN, y=df["bequest"] / _MAN, mode="markers",
+        marker=dict(color=df[f"score_{view}"], colorscale="Viridis", size=7,
+                    colorbar=dict(title="점수"), showscale=True),
+        text=hover, hovertemplate="%{text}<br>총수령 %{x:,.0f}만·상속 %{y:,.0f}만<extra></extra>",
+        name="조합",
+    ))
+
+    # ⭐ 추천 조합(안정형 1위 등) 별표 + 조건 라벨.
+    if best_id is not None and best_id in df["id"].values:
+        b = df[df["id"] == best_id].iloc[0]
+        bx, by = b["total_pv"] / _MAN, b["bequest"] / _MAN
+        fig.add_trace(go.Scatter(
+            x=[bx], y=[by], mode="markers", name="⭐추천 조합",
+            marker=dict(size=20, color="#F1C40F", symbol="star",
+                        line=dict(width=1.5, color="black")),
+            text=[_combo_label(b)],
+            hovertemplate="추천: %{text}<extra></extra>",
+        ))
+        fig.add_annotation(x=bx, y=by, text=f"⭐ 추천: {_combo_label(b)}",
+                           showarrow=True, arrowhead=2, ax=0, ay=-35,
+                           font=dict(size=12, color="#B7950B"),
+                           bgcolor="rgba(255,255,255,0.7)")
+
+    fig.update_layout(title=f"조합별 점수 산점도 ({view})",
+                      xaxis_title="총수령액 현재가치(만원)", yaxis_title="잔여자산(만원)")
     return fig
