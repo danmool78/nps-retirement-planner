@@ -145,6 +145,10 @@ _CSS = """
 [data-testid="stSidebar"] [data-testid="stExpander"] details{background:#F8FAFC; border:1px solid #D5DDE8; border-radius:12px;}
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{color:#334155; font-weight:500;}
 
+/* 자동으로 눌리는 '계산 시작' 버튼: 평소엔 숨기고, 4초가 지나도 계산이 시작되지 않으면 보여준다 */
+.st-key-go_compute{visibility:hidden; height:0; overflow:hidden; animation:reveal-go 0s linear 4s forwards;}
+@keyframes reveal-go{to{visibility:visible; height:auto; overflow:visible;}}
+
 /* 계산 중 로딩 화면 */
 .loading{display:flex; flex-direction:column; align-items:center; gap:14px; padding:56px 16px;
          border:1px solid var(--line); border-radius:16px; background:linear-gradient(180deg,#F5F9FF,#fff); margin:1rem 0;}
@@ -477,6 +481,28 @@ def _frame(code: str, height: int = 1, target=st):
 def sidebar_action(action: str):
     """'open' / 'close'(모바일 폭에서만). 매번 다른 내용으로 렌더해 스크립트가 다시 실행되게 한다."""
     _frame(_SIDEBAR_JS % action + f"<!-- {time.time()} -->")
+
+
+_CLICK_JS = """
+<script>
+(function(){
+  // 부모 문서에 화면이 그려진 뒤(두 프레임 후) 숨은 버튼을 눌러 다음 단계를 시작. 버튼이 늦게 생기면 잠시 재시도.
+  const w = window.parent, key = "%s";
+  let tries = 0;
+  function go(){
+    const b = w.document.querySelector(".st-key-" + key + " button");
+    if (b) { b.click(); return; }
+    if (++tries < 40) setTimeout(go, 50);
+  }
+  w.requestAnimationFrame(() => w.requestAnimationFrame(() => setTimeout(go, 30)));
+})();
+</script>
+"""
+
+
+def auto_click(key: str):
+    """key 버튼을 페이지 스크립트로 자동 클릭(현재 실행이 끝나 화면이 전송된 뒤 다음 실행을 시작할 때 사용)."""
+    _frame(_CLICK_JS % key + f"<!-- {time.time()} -->")
 
 
 _URL_JS = """
