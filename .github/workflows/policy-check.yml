@@ -1,0 +1,51 @@
+# 매월 1일·15일 policy.json(제도 파라미터)을 점검하고, 갱신 시기가 지난 항목이 있으면
+# '제도 파라미터 갱신 필요' 이슈를 열거나(이미 있으면) 내용을 갱신한다.
+name: 제도 파라미터 점검
+
+on:
+  schedule:
+    - cron: "17 0 1,15 * *"
+  workflow_dispatch:
+  push:
+    paths: ["policy.json", "policy.py", "scripts/check_policy.py"]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 점검
+        id: check
+        run: |
+          set +e
+          python scripts/check_policy.py > report.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: 형식 오류면 실패
+        if: steps.check.outputs.code == '2'
+        run: cat report.md && exit 1
+      - name: 갱신 필요 이슈 등록
+        if: steps.check.outputs.code == '1' && github.event_name != 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('report.md', 'utf8');
+            const title = '제도 파라미터 갱신 필요';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
+            const found = issues.find(i => i.title === title && !i.pull_request);
+            if (found) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: found.number, body });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo, title, body });
+            }

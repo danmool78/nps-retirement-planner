@@ -32,7 +32,8 @@ def run(user: UserInput, strat: Strategy, cfg: Config,
 
     # 시뮬레이션 총 연수(전략의 사망시점 기준)를 한 번 돌려 파악.
     base = simulate(user, strat, cfg, record=False)
-    n_years = len(base.metrics["assets_yearly"])
+    # 1년 미만 시뮬레이션도 경로 배열이 비지 않도록 최소 1년.
+    n_years = max(1, len(base.metrics["assets_yearly"]))
     start_age_h = base.metrics["start_age_h"]
 
     shortfalls, bequests, depletions = [], [], []

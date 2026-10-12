@@ -8,6 +8,9 @@ config.py
 - 감액률, 가산률, 물가상승률, 지급개시연령, 보험료율 등 '제도 기준'은 향후 법령 개정으로
   얼마든지 바뀔 수 있다. 따라서 코드에 하드코딩하지 않고 모두 이 파일의 dataclass 기본값으로
   모아 둔다. Streamlit 화면(app.py)에서 사용자가 이 값들을 실시간으로 덮어쓸 수 있다.
+- 정기적으로 바뀌는 값(보험료율·기준소득월액 상한·기초연금액·선정기준액 등)은 policy.json 에
+  시행일별로 관리되며, 화면 기본값은 그 파일에서 오늘 날짜 기준으로 자동 선택된다(policy.py).
+  여기 값은 policy.json 이 없을 때의 대체값이다.
 - dataclass 를 사용해 (1) 기본값 제공, (2) 타입 명시, (3) 손쉬운 복제/수정을 가능하게 한다.
 
 용어
@@ -87,7 +90,7 @@ class HousingPolicy:
     # 주택가격 상한(현행 12억원). 이보다 비싼 집도 이 금액 기준으로 월지급액이 산정된다(상한 캡).
     house_price_cap: float = 1_200_000_000
 
-    # ★ 한국주택금융공사(HF) '종신지급방식 정액형' 월지급금 실제 예시표(2026.03.01 기준).
+    # 한국주택금융공사(HF) '종신지급방식 정액형' 월지급금 실제 예시표(2026.03.01 기준).
     #   (연령, 주택가격 1억원당 월지급액[원]). 월지급금은 주택가격에 비례하므로 1억당 값으로 관리한다.
     #   중간 나이는 선형 보간, 표 범위 밖은 선형 외삽한다. 제도 개정 시 이 표만 갱신하면 된다.
     monthly_per_100m: list = field(default_factory=lambda: [
@@ -268,14 +271,14 @@ class TaxPolicy:
 @dataclass
 class BasicPensionPolicy:
     """기초연금(65세 이상, 소득하위 70%) 정책."""
-    single_amount: float = 340_000    # 단독 최대 월지급액(원, 대략 현행)
+    single_amount: float = 349_700    # 단독 기준연금액(원, 2026.1~). 최신값은 policy.json
     couple_reduction: float = 0.20    # 부부 동시 수급 시 각 20% 감액
     start_age: int = 65               # 지급 개시 연령
     inflation_indexed: bool = True    # 매년 물가 반영 인상
 
     # --- 대상 자동판정(소득인정액)용 파라미터 ---
     # 소득인정액 = 공적연금소득 + 재산의 소득환산액. 이 값이 선정기준액 이하면 수급 대상.
-    selection_criteria_couple: float = 3_650_000   # 부부 선정기준액(월 소득인정액, 2026 근사)
+    selection_criteria_couple: float = 3_952_000   # 부부 선정기준액(월 소득인정액, 2026.1~)
     property_basic_deduction: float = 135_000_000  # 기본재산공제(대도시 기준)
     financial_deduction: float = 20_000_000        # 금융재산 공제
     property_conversion_rate: float = 0.04         # 재산의 소득환산율(연)

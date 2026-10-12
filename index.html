@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>부부 노후자금 시뮬레이터</title>
+    <meta name="description" content="국민연금·주택연금·기초연금을 통합한 부부 노후자금 시뮬레이터. 모든 계산은 브라우저 안에서 실행됩니다." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Crect width='44' height='44' rx='12' fill='%231D4ED8'/%3E%3Cpath d='M10 29.5 17 22.5l5 5 11-12' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M26.5 15.5H33V22' fill='none' stroke='%2393C5FD' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.2/build/stlite.css" />
+    <style>
+      html, body { margin: 0; background: #ffffff; }
+      .boot { min-height: 100vh; display: grid; place-items: center; padding: 16px; box-sizing: border-box;
+              font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; color: #0F172A; }
+      .boot-card { max-width: 420px; text-align: center; }
+      .boot h1 { font-size: 1.25rem; margin: 16px 0 6px; }
+      .boot p { color: #64748B; font-size: .9rem; line-height: 1.6; margin: 0; }
+      .bar { height: 4px; border-radius: 4px; background: #E2E8F0; overflow: hidden; margin: 20px auto 0; width: 220px; }
+      .bar i { display: block; height: 100%; width: 40%; background: #1D4ED8; border-radius: 4px;
+               animation: slide 1.3s ease-in-out infinite; }
+      @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot">
+        <div class="boot-card">
+          <svg width="56" height="56" viewBox="0 0 44 44" aria-hidden="true">
+            <rect width="44" height="44" rx="12" fill="#1D4ED8" />
+            <path d="M10 29.5 17 22.5l5 5 11-12" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M26.5 15.5H33V22" fill="none" stroke="#93C5FD" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <h1>부부 노후자금 시뮬레이터</h1>
+          <p>계산 엔진을 브라우저에 불러오는 중입니다.<br />처음 한 번은 10~30초 정도 걸리며, 이후에는 더 빨라집니다.</p>
+          <div class="bar"><i></i></div>
+        </div>
+      </div>
+    </div>
+    <script type="module">
+      import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.2/build/stlite.js";
+
+      // 앱 소스와 제도 파라미터(policy.json)를 같은 사이트에서 불러온다.
+      // ?v= 로 캐시를 우회해, policy.json 갱신이 다음 접속 때 바로 반영되게 한다.
+      const v = Date.now();
+      const modules = [
+        "app.py", "ui.py", "policy.py", "config.py", "cashflow.py", "nps.py", "pension.py",
+        "teacher_pension.py", "gov_pension.py", "housing_pension.py", "optimizer.py",
+        "montecarlo.py", "visualization.py", "export.py",
+      ];
+      const files = {};
+      for (const f of [...modules, "policy.json"]) files[f] = { url: `./${f}?v=${v}` };
+
+      mount(
+        {
+          requirements: ["plotly", "openpyxl"],
+          entrypoint: "app.py",
+          files,
+          streamlitConfig: {
+            "theme.base": "light",
+            "theme.primaryColor": "#1D4ED8",
+            "theme.backgroundColor": "#FFFFFF",
+            "theme.secondaryBackgroundColor": "#F8FAFC",
+            "theme.textColor": "#0F172A",
+            "client.toolbarMode": "viewer",
+          },
+        },
+        document.getElementById("root"),
+      );
+    </script>
+  </body>
+</html>
