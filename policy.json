@@ -1,0 +1,255 @@
+{
+  "updated": "2026-10-12",
+  "notes": "시행일(from)별 이력. 앱은 오늘 날짜 기준 가장 최근 시행값을 자동 선택한다. 미래 시행값을 미리 넣어두면 그날부터 자동 적용된다. revises: annual-01(매년 1월 고시) / annual-07(매년 7월 적용) / irregular(법 개정 시).",
+  "params": {
+    "nps_premium_rate": {
+      "label": "국민연금 보험료율",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "국민연금법 개정(2025.3 국회 통과): 2026년 9.5%부터 매년 0.5%p 인상, 2033년 13%",
+      "history": [
+        {
+          "from": "1998-04-01",
+          "value": 0.09
+        },
+        {
+          "from": "2026-01-01",
+          "value": 0.095,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2027-01-01",
+          "value": 0.1,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2028-01-01",
+          "value": 0.105,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2029-01-01",
+          "value": 0.11,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2030-01-01",
+          "value": 0.115,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2031-01-01",
+          "value": 0.12,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2032-01-01",
+          "value": 0.125,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        },
+        {
+          "from": "2033-01-01",
+          "value": 0.13,
+          "note": "2025 연금개혁(매년 0.5%p 인상)"
+        }
+      ]
+    },
+    "nps_income_cap": {
+      "label": "국민연금 기준소득월액 상한",
+      "unit": "원",
+      "revises": "annual-07",
+      "source": "보건복지부 고시(매년 7월 적용)",
+      "history": [
+        {
+          "from": "2024-07-01",
+          "value": 6170000
+        },
+        {
+          "from": "2025-07-01",
+          "value": 6370000
+        },
+        {
+          "from": "2026-07-01",
+          "value": 6590000
+        }
+      ]
+    },
+    "nps_early_monthly_reduction": {
+      "label": "조기노령연금 월감액률",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "국민연금법 제63조의2",
+      "history": [
+        {
+          "from": "2012-01-01",
+          "value": 0.005
+        }
+      ]
+    },
+    "nps_defer_monthly_increase": {
+      "label": "연기연금 월가산률",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "국민연금법 제62조",
+      "history": [
+        {
+          "from": "2012-01-01",
+          "value": 0.006
+        }
+      ]
+    },
+    "nps_survivor_rate": {
+      "label": "국민 유족연금 지급률(가입 20년 이상)",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "국민연금법 제74조(10년 미만 40%, 10~20년 50%, 20년 이상 60%)",
+      "history": [
+        {
+          "from": "2008-01-01",
+          "value": 0.6
+        }
+      ]
+    },
+    "survivor_dup_rate": {
+      "label": "유족연금 중복급여 조정률",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "국민연금법 제56조",
+      "history": [
+        {
+          "from": "2016-11-30",
+          "value": 0.3
+        }
+      ]
+    },
+    "basic_single_amount": {
+      "label": "기초연금 기준연금액(단독)",
+      "unit": "원",
+      "revises": "annual-01",
+      "source": "보건복지부 고시(매년 1월, 전년 물가 반영)",
+      "history": [
+        {
+          "from": "2025-01-01",
+          "value": 342510
+        },
+        {
+          "from": "2026-01-01",
+          "value": 349700
+        }
+      ]
+    },
+    "basic_couple_reduction": {
+      "label": "기초연금 부부 감액률",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "기초연금법 제8조",
+      "history": [
+        {
+          "from": "2014-07-01",
+          "value": 0.2
+        }
+      ]
+    },
+    "basic_criteria_couple": {
+      "label": "기초연금 선정기준액(부부)",
+      "unit": "원",
+      "revises": "annual-01",
+      "source": "보건복지부 고시(매년 1월)",
+      "history": [
+        {
+          "from": "2025-01-01",
+          "value": 3648000
+        },
+        {
+          "from": "2026-01-01",
+          "value": 3952000
+        }
+      ]
+    },
+    "basic_property_deduction": {
+      "label": "기본재산액 공제(대도시)",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "기초연금법 시행령(대도시 1.35억/중소도시 8,500만/농어촌 7,250만)",
+      "history": [
+        {
+          "from": "2024-01-01",
+          "value": 135000000
+        }
+      ]
+    },
+    "basic_financial_deduction": {
+      "label": "금융재산 공제",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "기초연금법 시행령",
+      "history": [
+        {
+          "from": "2014-07-01",
+          "value": 20000000
+        }
+      ]
+    },
+    "basic_conversion_rate": {
+      "label": "재산의 소득환산율(연)",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "기초연금법 시행령",
+      "history": [
+        {
+          "from": "2014-07-01",
+          "value": 0.04
+        }
+      ]
+    },
+    "housing_price_cap": {
+      "label": "주택연금 가입 주택가격 상한(공시가격)",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "한국주택금융공사법 시행령",
+      "history": [
+        {
+          "from": "2023-10-12",
+          "value": 1200000000
+        }
+      ]
+    },
+    "housing_monthly_per_100m": {
+      "label": "주택연금 종신·정액형 월지급금(1억당, 연령별)",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "한국주택금융공사 월지급금 예시표(2026.03.01 신규가입자 기준)",
+      "history": [
+        {
+          "from": "2026-03-01",
+          "value": [
+            [
+              55,
+              156000
+            ],
+            [
+              60,
+              210000
+            ],
+            [
+              65,
+              252000
+            ],
+            [
+              70,
+              307000
+            ],
+            [
+              75,
+              381000
+            ],
+            [
+              80,
+              483000
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

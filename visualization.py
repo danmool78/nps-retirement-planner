@@ -26,6 +26,34 @@ from cashflow import Scenario
 
 _MAN = 10_000  # 원 -> 만원
 
+# 공통 색상 팔레트(앱 UI 와 동일 톤).
+C_INCOME = "#2563EB"   # 수입
+C_EXPENSE = "#DC2626"  # 지출·부족
+C_NET = "#059669"      # 순현금흐름·안전
+C_ASSET = "#7C3AED"    # 자산
+C_ACCENT = "#D97706"   # 추천(별표)
+C_MUTED = "#64748B"    # 보조선·주석
+FONT = "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif"
+
+
+def _style(fig: go.Figure, height: int = 400) -> go.Figure:
+    """모든 그래프에 공통 스타일 적용: 흰 배경·통일 폰트·하단 가로 범례(모바일 폭 대응)."""
+    fig.update_layout(
+        template="plotly_white",
+        height=height,
+        font=dict(family=FONT, size=12, color="#1E293B"),
+        title=dict(font=dict(size=15, color="#0F172A"), x=0.01, xanchor="left"),
+        margin=dict(l=52, r=20, t=60, b=96),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0,
+                    font=dict(size=11)),
+        hoverlabel=dict(font_family=FONT),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#FFFFFF",
+    )
+    fig.update_xaxes(gridcolor="#EEF2F7", zerolinecolor="#CBD5E1")
+    fig.update_yaxes(gridcolor="#EEF2F7", zerolinecolor="#CBD5E1")
+    return fig
+
 
 # 1) 연령별 월 현금흐름 ------------------------------------------------------
 def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
@@ -36,11 +64,11 @@ def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
     df = sc.frame
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["income"] / _MAN,
-                             name="연금 등 수입", line=dict(color="#2E86DE")))
+                             name="연금 등 수입", line=dict(color=C_INCOME, width=2.2)))
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["expense"] / _MAN,
-                             name="생활비 지출", line=dict(color="#E74C3C")))
+                             name="생활비 지출", line=dict(color=C_EXPENSE, width=2.2)))
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["net"] / _MAN,
-                             name="순현금흐름", line=dict(color="#27AE60", dash="dot")))
+                             name="순현금흐름", line=dict(color=C_NET, dash="dot", width=2)))
 
     deaths = sorted(deaths or [], key=lambda t: t[1])
 
@@ -49,18 +77,20 @@ def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
         fig.add_vrect(x0=deaths[0][1], x1=deaths[1][1],
                       fillcolor="#95A5A6", opacity=0.12, line_width=0,
                       annotation_text="홀로 생존 구간(생활비↓·유족연금 조정)",
-                      annotation_position="top left", annotation_font_size=10,
+                      annotation_position="bottom left", annotation_font_size=10,
                       annotation_font_color="#566573")
 
     # 사망 시점 세로선(수입·지출이 급변하는 이유를 명시).
-    for label, age in deaths:
+    # 두 사망 시점이 가까우면 라벨이 겹치므로 첫 번째는 선 왼쪽, 두 번째는 오른쪽에 둔다.
+    for i, (label, age) in enumerate(deaths):
         fig.add_vline(x=age, line_dash="dash", line_color="#7F8C8D",
-                      annotation_text=f"⚰️ {label} {age:.0f}세", annotation_position="top",
+                      annotation_text=f"{label} {age:.0f}세",
+                      annotation_position="top left" if i == 0 else "top right",
                       annotation_font_size=11, annotation_font_color="#566573")
 
     fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title="남편 나이",
                       yaxis_title="월 금액(만원)", hovermode="x unified")
-    return fig
+    return _style(fig)
 
 
 # 2) 연령별 누적자산 ---------------------------------------------------------
@@ -69,10 +99,11 @@ def fig_cumulative_assets(sc: Scenario) -> go.Figure:
     df = sc.frame
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["assets"] / _MAN,
-                             name="금융자산 잔액", fill="tozeroy", line=dict(color="#8E44AD")))
+                             name="금융자산 잔액", fill="tozeroy", line=dict(color=C_ASSET, width=2.2),
+                             fillcolor="rgba(124,58,237,0.12)"))
     fig.update_layout(title="② 연령별 누적자산", xaxis_title="남편 나이",
                       yaxis_title="금융자산(만원)", hovermode="x unified")
-    return fig
+    return _style(fig)
 
 
 # 3) 연금 수령시점별 총수령액 + 납입원금/원금확보 시점 -----------------------
@@ -84,7 +115,7 @@ def fig_nps_by_claim_age(df: pd.DataFrame, label: str = "남편") -> go.Figure:
     """
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df["claim_age"], y=df["total_nominal"] / _MAN,
-                         name="명목 총수령액", marker_color="#2E86DE"))
+                         name="명목 총수령액", marker_color=C_INCOME))
     fig.add_trace(go.Scatter(x=df["claim_age"], y=df["monthly"] / _MAN,
                              name="개시 월수령액", yaxis="y2", line=dict(color="#E67E22")))
 
@@ -111,7 +142,7 @@ def fig_nps_by_claim_age(df: pd.DataFrame, label: str = "남편") -> go.Figure:
         yaxis2=dict(title="월수령액(만원)", overlaying="y", side="right"),
         hovermode="x unified",
     )
-    return fig
+    return _style(fig)
 
 
 # 3-b) 나이별 누적 수령액 + 원금확보 시점(선 그래프) -------------------------
@@ -126,7 +157,7 @@ def fig_cumulative_receipts(curves, principal, breakevens, death, reps, monthlie
     - 각 곡선의 원금확보 지점에 마커와 '원금확보 XX세·이득 YY년' 주석을 표시.
     원금확보가 기대수명보다 충분히 이르게(중간쯤) 올수록 이득 기간이 길다.
     """
-    palette = ["#27AE60", "#2E86DE", "#E67E22", "#8E44AD"]
+    palette = [C_NET, C_INCOME, C_ACCENT, C_ASSET]
     monthlies = monthlies or {}
     fig = go.Figure()
 
@@ -171,17 +202,17 @@ def fig_cumulative_receipts(curves, principal, breakevens, death, reps, monthlie
         xaxis_title="나이", yaxis_title="누적 수령액(만원)",
         hovermode="x unified",
     )
-    return fig
+    return _style(fig)
 
 
 # 4) 주택연금 개시시점별 부족액 ---------------------------------------------
 def fig_shortfall_by_housing(df: pd.DataFrame) -> go.Figure:
     """주택연금 개시나이별 생활비 부족액총합."""
     fig = px.line(df, x="housing_age", y=df["shortfall_total"] / _MAN, markers=True)
-    fig.update_traces(line_color="#E74C3C")
+    fig.update_traces(line_color=C_EXPENSE)
     fig.update_layout(title="④ 주택연금 개시시점별 부족액 비교",
                       xaxis_title="주택연금 개시나이", yaxis_title="부족액총합(만원)")
-    return fig
+    return _style(fig)
 
 
 # 5) 국민연금 × 주택연금 히트맵 ---------------------------------------------
@@ -192,7 +223,7 @@ def fig_heatmap(df: pd.DataFrame, value: str = "shortfall_total") -> go.Figure:
     """
     sub = df[df["use_housing"]].copy()
     if sub.empty:
-        return go.Figure().update_layout(title="⑤ 히트맵 (주택연금 조합 없음)")
+        return _style(go.Figure().update_layout(title="⑤ 히트맵 (주택연금 조합 없음)"))
     pivot = sub.pivot_table(index="h_claim", columns="housing", values=value, aggfunc="min")
     fig = px.imshow(
         pivot / _MAN,
@@ -202,7 +233,7 @@ def fig_heatmap(df: pd.DataFrame, value: str = "shortfall_total") -> go.Figure:
         text_auto=".0f",
     )
     fig.update_layout(title="⑤ 국민연금 × 주택연금 개시나이 히트맵(부족액)")
-    return fig
+    return _style(fig)
 
 
 # 6) 물가상승률별 부족액 -----------------------------------------------------
@@ -219,7 +250,7 @@ def fig_shortfall_by_inflation(df: pd.DataFrame) -> go.Figure:
                            textposition="outside"))
     fig.update_layout(title="⑥ 물가상승률별 생활비 부족액(현재값 기준 ±2%p)",
                       xaxis_title="물가상승률(%)", yaxis_title="부족액총합(만원)")
-    return fig
+    return _style(fig)
 
 
 # 7) 기대수명별 유리한 전략 --------------------------------------------------
@@ -227,9 +258,9 @@ def fig_best_by_life(df: pd.DataFrame) -> go.Figure:
     """기대수명별 최적 전략의 총수령액/잔여자산 비교 + 채택 수령나이 주석."""
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df["life"], y=df["total_pv"] / _MAN,
-                         name="총수령액(현재가치)", marker_color="#2E86DE"))
+                         name="총수령액(현재가치)", marker_color=C_INCOME))
     fig.add_trace(go.Bar(x=df["life"], y=df["bequest"] / _MAN,
-                         name="잔여자산(상속)", marker_color="#27AE60"))
+                         name="잔여자산(상속)", marker_color=C_NET))
     # 각 막대 위에 채택된 수령나이 조합 주석.
     for _, r in df.iterrows():
         fig.add_annotation(x=r["life"], y=(r["total_pv"] / _MAN),
@@ -237,7 +268,7 @@ def fig_best_by_life(df: pd.DataFrame) -> go.Figure:
                            showarrow=False, yshift=12, font=dict(size=10))
     fig.update_layout(title="⑦ 기대수명별 유리한 전략 비교", barmode="group",
                       xaxis_title="기대수명(세)", yaxis_title="금액(만원)")
-    return fig
+    return _style(fig)
 
 
 # 8) Pareto Frontier ---------------------------------------------------------
@@ -254,10 +285,10 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
     safe_line = max_sf * 0.15 if max_sf > 0 else 1.0
     top = max_sf * 1.05 if max_sf > 0 else 10.0
     fig.add_hrect(y0=0, y1=safe_line, fillcolor="#27AE60", opacity=0.08, line_width=0,
-                  annotation_text="🟢 안전구간 (부족 거의 없음)", annotation_position="top left",
+                  annotation_text="안전구간 (부족 거의 없음)", annotation_position="top left",
                   annotation_font_color="#1E8449")
     fig.add_hrect(y0=safe_line, y1=top, fillcolor="#E74C3C", opacity=0.07, line_width=0,
-                  annotation_text="🔴 위험구간 (부족 큼)", annotation_position="top left",
+                  annotation_text="위험구간 (부족 큼)", annotation_position="top left",
                   annotation_font_color="#C0392B")
 
     # 전체 조합(회색 점).
@@ -271,7 +302,7 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
     fig.add_trace(go.Scatter(
         x=pareto["total_pv"] / _MAN, y=pareto["shortfall_total"] / _MAN,
         mode="lines+markers", name="Pareto 경계",
-        line=dict(color="#E74C3C"), marker=dict(size=9, color="#E74C3C"),
+        line=dict(color=C_EXPENSE), marker=dict(size=9, color=C_EXPENSE),
     ))
     # 최적점 강조 + 주석.
     if best_id is not None and best_id in df["id"].values:
@@ -280,21 +311,21 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
         by = float(b["shortfall_total"]) / _MAN
         housing = f"주택 {int(b['housing'])}세" if b.get("use_housing") else "주택 미사용"
         fig.add_trace(go.Scatter(
-            x=[bx], y=[by], mode="markers", name="⭐추천 최적점",
-            marker=dict(size=18, color="#F1C40F", symbol="star",
+            x=[bx], y=[by], mode="markers", name="추천 최적점",
+            marker=dict(size=18, color=C_ACCENT, symbol="star",
                         line=dict(width=1.2, color="black")),
         ))
         fig.add_annotation(
             x=bx, y=by,
-            text=f"★ 추천: 부족 0 + 최대수령<br>국민 {int(b['h_claim'])}/{int(b['w_claim'])}세 · {housing}",
+            text=f"추천: 부족 0 + 최대수령<br>국민 {int(b['h_claim'])}/{int(b['w_claim'])}세 · {housing}",
             showarrow=True, arrowhead=2, ax=30, ay=40,
             font=dict(size=12, color="#1A1A1A"), bgcolor="rgba(255,255,255,0.95)",
-            bordercolor="#F1C40F", borderwidth=2, borderpad=4,
+            bordercolor=C_ACCENT, borderwidth=2, borderpad=4,
         )
     fig.update_layout(title="⑧ Pareto Frontier (총수령액↑ · 부족액↓)",
                       xaxis_title="총수령액 현재가치(만원)",
                       yaxis_title="부족액총합(만원)")
-    return fig
+    return _style(fig)
 
 
 # 몬테카를로 변동성 팬차트 ---------------------------------------------------
@@ -312,14 +343,14 @@ def fig_montecarlo_fan(mc) -> go.Figure:
     fig.add_trace(go.Scatter(x=ages, y=p90, mode="lines", line=dict(width=0),
                              name="상위 10%(p90)", showlegend=True))
     fig.add_trace(go.Scatter(x=ages, y=p10, mode="lines", fill="tonexty",
-                             fillcolor="rgba(46,134,222,0.15)", line=dict(width=0),
+                             fillcolor="rgba(37,99,235,0.15)", line=dict(width=0),
                              name="하위 10%(p10)"))
     fig.add_trace(go.Scatter(x=ages, y=p50, mode="lines",
-                             line=dict(color="#2E86DE", width=2.5), name="중앙값(p50)"))
+                             line=dict(color=C_INCOME, width=2.5), name="중앙값(p50)"))
     fig.update_layout(
         title=f"변동성 스트레스: 나이별 자산 분위 (변동성 {mc['volatility']*100:.0f}%, {mc['n_sims']}회)",
         xaxis_title="남편 나이", yaxis_title="금융자산(만원)", hovermode="x unified")
-    return fig
+    return _style(fig)
 
 
 # 조합별 점수 산점도 ----------------------------------------------------------
@@ -337,7 +368,7 @@ def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
     """
     총수령액(→) 대비 잔여자산(↑) 산점도. 색상=관점 점수(밝을수록 좋음).
     - 각 점 hover 에 수령개시 조건(국민연금·주택연금 나이) 표시.
-    - best_id 가 주어지면 ⭐추천 조합을 별표로 강조하고 조건을 라벨로 붙인다.
+    - best_id 가 주어지면 추천 조합을 별표로 강조하고 조건을 라벨로 붙인다.
 
     plotly 버전 호환을 위해 pandas Series 대신 순수 list 를 전달한다.
     """
@@ -355,7 +386,7 @@ def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
         name="조합",
     ))
 
-    # ⭐ 추천 조합 별표 + 조건 라벨.
+    # 추천 조합 별표 + 조건 라벨.
     ids = df["id"].tolist()
     if best_id is not None and best_id in ids:
         b = df[df["id"] == best_id].iloc[0]
@@ -363,17 +394,17 @@ def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
         by = float(b["bequest"]) / _MAN
         label = _combo_label(b)
         fig.add_trace(go.Scatter(
-            x=[bx], y=[by], mode="markers", name="⭐추천 조합",
-            marker=dict(size=20, color="#F1C40F", symbol="star",
+            x=[bx], y=[by], mode="markers", name="추천 조합",
+            marker=dict(size=20, color=C_ACCENT, symbol="star",
                         line=dict(width=1.5, color="black")),
             text=[label], hovertemplate="추천: %{text}<extra></extra>",
         ))
-        fig.add_annotation(x=bx, y=by, text=f"★ 추천: {label}",
+        fig.add_annotation(x=bx, y=by, text=f"추천: {label}",
                            showarrow=True, arrowhead=2, ax=0, ay=-35,
                            font=dict(size=12, color="#1A1A1A"),
                            bgcolor="rgba(255,255,255,0.95)",
-                           bordercolor="#F1C40F", borderwidth=2, borderpad=4)
+                           bordercolor=C_ACCENT, borderwidth=2, borderpad=4)
 
     fig.update_layout(title=f"⑨ 조합별 점수 산점도 ({view})",
                       xaxis_title="총수령액 현재가치(만원)", yaxis_title="잔여자산(만원)")
-    return fig
+    return _style(fig)

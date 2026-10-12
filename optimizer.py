@@ -24,22 +24,26 @@ import pandas as pd
 
 import nps
 import pension
-from cashflow import Strategy, Scenario, simulate
+from cashflow import Strategy, Scenario, simulate, housing_min_start, _wife_age_at_start
 from config import Config, UserInput, Person
 
 
 # ---------------------------------------------------------------------------
 # 1. 조합 생성
 # ---------------------------------------------------------------------------
-def _claim_age_range(person: Person, cfg: Config) -> List[int]:
+def _claim_age_range(person: Person, cfg: Config, min_age: int | None = None) -> List[int]:
     """
     한 사람의 탐색 대상 연금 수령개시나이 목록(정상 ±조기/연기 한도).
     연금 종류(국민연금/교직원연금)에 따라 조기/연기 허용 연수가 다르므로 제도별로 계산한다.
+    min_age: 시뮬레이션 시작 시점의 나이. 시작 전 개시는 그 기간 수령분이 누락되므로 제외한다.
     """
     module, policy = pension.resolve(person, cfg)
     normal = module.normal_start_age(person.birth_year, policy)
     low = normal - policy.max_early_years
     high = normal + policy.max_defer_years
+    if min_age is not None:
+        low = max(low, min_age)
+        high = max(high, low)  # 이미 연기 한도를 넘긴 나이에서 시작하면 시작 즉시 개시
     return list(range(low, high + 1))
 
 
@@ -67,12 +71,12 @@ def generate_strategies(
     h_life = husband_life if husband_life is not None else user.husband_life_expectancy
     w_life = wife_life if wife_life is not None else user.wife_life_expectancy
 
-    h_ages = _claim_age_range(user.husband, cfg)
-    w_ages = _claim_age_range(user.wife, cfg)
+    h_ages = _claim_age_range(user.husband, cfg, min_age=user.retirement_age)
+    w_ages = _claim_age_range(user.wife, cfg, min_age=_wife_age_at_start(user))
 
     if housing_ages is None:
-        # 55세부터 남편 은퇴+15년까지 3년 간격으로 탐색.
-        start = cfg.housing.min_start_age
+        # 가입 가능·은퇴 이후 나이부터 남편 은퇴+15년까지 3년 간격으로 탐색.
+        start = housing_min_start(user, cfg)
         housing_ages = list(range(start, user.retirement_age + 16, 3))
 
     # 추납/임의가입은 '사용자가 입력하면 항상 적용'(가입 결정은 사용자 몫).
@@ -80,7 +84,7 @@ def generate_strategies(
     chunap_opts = [True] if (user.husband.chunap_years or user.wife.chunap_years) else [False]
     vol_opts = [True] if (user.husband.voluntary_years or user.wife.voluntary_years) else [False]
     housing_opts = [(False, 0)]  # 주택연금 미사용
-    if user.use_housing_pension:
+    if user.use_housing_pension and user.house_value > 0:
         housing_opts += [(True, a) for a in housing_ages]
 
     strategies: List[Strategy] = []
@@ -253,10 +257,10 @@ def pareto_front(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 5. 자동 장단점 설명
 # ---------------------------------------------------------------------------
-def explain(row: pd.Series, df: pd.DataFrame) -> str:
+def explain_parts(row: pd.Series, df: pd.DataFrame):
     """
-    한 조합의 장단점을 다른 조합 대비 상대적으로 자동 서술.
-    상위 조합 표에 함께 보여줄 한 줄 설명을 생성한다.
+    한 조합의 장단점을 다른 조합 대비 상대적으로 자동 판정.
+    반환: (장점 리스트, 단점 리스트) — 화면에서 아이콘과 함께 목록으로 렌더링한다.
     """
     pros, cons = [], []
 
@@ -289,9 +293,15 @@ def explain(row: pd.Series, df: pd.DataFrame) -> str:
         elif row["worst_infl_shortfall"] >= df["worst_infl_shortfall"].quantile(0.75):
             cons.append("고물가에 취약")
 
+    return pros, cons
+
+
+def explain(row: pd.Series, df: pd.DataFrame) -> str:
+    """explain_parts() 결과를 한 줄 텍스트로(리포트·표 등 텍스트 전용 출력용)."""
+    pros, cons = explain_parts(row, df)
     pro_txt = " / ".join(pros) if pros else "특별한 강점 없음"
     con_txt = " / ".join(cons) if cons else "뚜렷한 단점 없음"
-    return f"👍 {pro_txt}  ｜  👎 {con_txt}"
+    return f"장점: {pro_txt}  ｜  단점: {con_txt}"
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +412,7 @@ def shortfall_by_housing_age(user: UserInput, cfg: Config) -> pd.DataFrame:
     from cashflow import build_strategy_from_user
 
     base = build_strategy_from_user(user, cfg)
-    start = cfg.housing.min_start_age
+    start = housing_min_start(user, cfg)
     ages = list(range(start, user.retirement_age + 16))
     rows = []
     for age in ages:
@@ -450,7 +460,7 @@ def best_strategy_by_life(user: UserInput, cfg: Config, view: str = "stable") ->
     """
     # 속도: 기대수명 민감도는 '수령나이' 중심 비교이므로 주택연금 개시나이는 대표 1개로 고정해
     # 조합 수를 줄인다(전체 격자 탐색은 메인 결과에서 이미 수행).
-    rep_house = [max(cfg.housing.min_start_age, user.retirement_age)]
+    rep_house = [housing_min_start(user, cfg)]
     rows = []
     for life in cfg.optimizer.life_expectancy_scenarios:
         # 부부 기대수명을 동일 시나리오로 두고(간이) 탐색.

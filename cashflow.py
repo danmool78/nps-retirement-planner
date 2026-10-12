@@ -70,6 +70,24 @@ def _wife_age_at_start(user: UserInput) -> int:
     return user.retirement_age - age_gap
 
 
+def housing_age_gap(user: UserInput) -> int:
+    """
+    주택연금 월지급액은 '부부 중 연소자' 나이로 산정된다(HF 기준).
+    남편 나이축의 개시나이에서 이 값을 빼면 연소자 나이가 된다(아내가 어리면 양수, 아니면 0).
+    """
+    return max(0, user.wife.birth_year - user.husband.birth_year)
+
+
+def housing_min_start(user: UserInput, cfg: Config) -> int:
+    """
+    주택연금 탐색 시작나이(남편 나이축).
+    - 시뮬레이션이 은퇴나이에서 시작하므로 그 이전 개시는 의미가 없다.
+    - 가입요건: 부부 중 1명(연장자)이 min_start_age 이상.
+    """
+    older_gap = max(0, user.husband.birth_year - user.wife.birth_year)  # 아내가 연상이면 양수
+    return max(user.retirement_age, cfg.housing.min_start_age - older_gap)
+
+
 def _person_base_pension(
     person: Person, claim_age: int, cfg: Config, use_chunap: bool, use_voluntary: bool
 ) -> float:
@@ -125,7 +143,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
     total_months = max(h_end_month, w_end_month)
 
     # 월 이율. annual_returns(연도별 수익률 배열)가 주어지면 그 해의 수익률을 사용(변동성 시뮬).
-    if annual_returns is not None:
+    if annual_returns is not None and len(annual_returns) > 0:
         n_yr = total_months // 12 + 1
         monthly_rates = [monthly_rate(annual_returns[min(y, len(annual_returns) - 1)])
                          for y in range(n_yr)]
@@ -154,10 +172,23 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
 
     # 주택연금 개시시점 월지급액(명목).
     house_base = (
-        hp.monthly_payment(user.housing_monthly_base, strat.housing_start_age, cfg.housing)
-        if strat.use_housing
+        hp.monthly_payment(user.housing_monthly_base,
+                           strat.housing_start_age - housing_age_gap(user), cfg.housing)
+        if strat.use_housing and user.house_value > 0
         else 0.0
     )
+
+    # 유족연금 산정 기준액(사망자 쪽).
+    # - 국민연금: 법상 유족연금은 '기본연금액'(조기감액·연기가산 전) 기준 → 정상개시 기준 월액.
+    # - 직역연금: 받고 있던 퇴직연금 기준. 개시 전에 사망하면 정상개시 기준 월액.
+    def _survivor_base(person, claimed_base, claim_age, death_age):
+        if person.pension_type != "nps" and death_age >= claim_age:
+            return claimed_base
+        normal = pension.normal_start_age(person, cfg)
+        return _person_base_pension(person, normal, cfg, strat.use_chunap, strat.use_voluntary)
+
+    h_surv_base = _survivor_base(user.husband, h_base, strat.husband_claim_age, strat.husband_life)
+    w_surv_base = _survivor_base(user.wife, w_base, strat.wife_claim_age, strat.wife_life)
 
     # 초기 금융자산에서 추납/임의가입 비용 차감.
     assets = user.financial_assets
@@ -191,39 +222,37 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
         # --- 1) 연금 수입 계산 ---
         # 남편 연금
         h_pension = 0.0
+        # 입력 월액은 '현재가치'이므로 생활비와 똑같이 시작 시점부터 물가를 반영한다
+        # (개시 전 기간의 물가를 빼먹으면 연기수령이 실질적으로 불리하게 왜곡됨).
         if h_alive and h_age >= strat.husband_claim_age:
-            years_since = int(h_age - strat.husband_claim_age)
             h_pension = h_mod.indexed_monthly_pension(
-                h_base, years_since, strat.inflation_rate, h_pol
+                h_base, year_idx, strat.inflation_rate, h_pol
             )
         # 아내 연금
         w_pension = 0.0
         if w_alive and w_age >= strat.wife_claim_age:
-            years_since = int(w_age - strat.wife_claim_age)
             w_pension = w_mod.indexed_monthly_pension(
-                w_base, years_since, strat.inflation_rate, w_pol
+                w_base, year_idx, strat.inflation_rate, w_pol
             )
 
         # --- 2) 유족연금(한쪽 사망 시, 중복급여 조정) ---
         # 생존자는 '본인 노령연금 + 유족연금 일부' vs '유족연금 전액' 중 선택(user.survivor_mode).
         # survivor_extra = 본인연금 위에 '추가로' 받는 금액(선택 총액 - 본인연금).
         survivor_extra = 0.0
-        if h_alive and not w_alive and w_base > 0:
-            years_since = int(w_age - strat.wife_claim_age) if w_age >= strat.wife_claim_age else 0
+        if h_alive and not w_alive and w_surv_base > 0:
             dead_pension = w_mod.indexed_monthly_pension(
-                w_base, max(0, years_since), strat.inflation_rate, w_pol
+                w_surv_base, year_idx, strat.inflation_rate, w_pol
             )
             survivor_extra = _survivor_total(h_pension, dead_pension, w_pol, user.survivor_mode) - h_pension
-        elif w_alive and not h_alive and h_base > 0:
-            years_since = int(h_age - strat.husband_claim_age) if h_age >= strat.husband_claim_age else 0
+        elif w_alive and not h_alive and h_surv_base > 0:
             dead_pension = h_mod.indexed_monthly_pension(
-                h_base, max(0, years_since), strat.inflation_rate, h_pol
+                h_surv_base, year_idx, strat.inflation_rate, h_pol
             )
             survivor_extra = _survivor_total(w_pension, dead_pension, h_pol, user.survivor_mode) - w_pension
 
         # --- 3) 주택연금(종신: 마지막 생존자까지 지급) ---
         house_income = 0.0
-        if strat.use_housing and (h_alive or w_alive) and h_age >= strat.housing_start_age:
+        if house_base > 0 and (h_alive or w_alive) and h_age >= strat.housing_start_age:
             years_since = int(h_age - strat.housing_start_age)
             house_income = hp.indexed_monthly_payment(
                 house_base, years_since, strat.inflation_rate, cfg.housing
@@ -248,7 +277,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
 
         # --- 3-d) 연금 외 기타소득(근로·임대·이자 등). 물가연동, 지정 나이까지만 ---
         other_income = 0.0
-        if (h_alive or w_alive) and user.other_income_monthly > 0 and h_age <= user.other_income_end_age:
+        if (h_alive or w_alive) and user.other_income_monthly > 0 and h_age < user.other_income_end_age:
             other_income = user.other_income_monthly * ((1.0 + strat.inflation_rate) ** year_idx)
 
         # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금 + 기타소득).
@@ -335,7 +364,7 @@ def build_strategy_from_user(user: UserInput, cfg: Config) -> Strategy:
     return Strategy(
         husband_claim_age=user.husband.nps_claim_age or h_normal,
         wife_claim_age=user.wife.nps_claim_age or w_normal,
-        housing_start_age=user.housing_start_age or max(cfg.housing.min_start_age, user.retirement_age),
+        housing_start_age=user.housing_start_age or housing_min_start(user, cfg),
         use_housing=user.use_housing_pension,
         use_chunap=(user.husband.chunap_years > 0 or user.wife.chunap_years > 0),
         use_voluntary=(user.husband.voluntary_years > 0 or user.wife.voluntary_years > 0),
