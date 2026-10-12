@@ -26,6 +26,19 @@ from cashflow import Scenario
 
 _MAN = 10_000  # 원 -> 만원
 
+# 가구 형태별 표기(app.py 가 1인 가구면 SINGLE=True 로 바꾼 뒤 그래프를 만든다).
+SINGLE = False
+
+
+def _who() -> str:
+    """나이축의 주인공: 부부면 '남편', 1인 가구면 '본인'."""
+    return "본인" if SINGLE else "남편"
+
+
+def _claims(h, w) -> str:
+    """수령나이 표기: 부부 '68/69세', 1인 '68세'."""
+    return f"{int(h)}세" if SINGLE else f"{int(h)}/{int(w)}세"
+
 # 공통 색상 팔레트(앱 UI 와 동일 톤).
 C_INCOME = "#2563EB"   # 수입
 C_EXPENSE = "#DC2626"  # 지출·부족
@@ -92,7 +105,7 @@ def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
     # 세로선·음영 주석 때문에 축이 데이터보다 넓어지지 않도록 데이터 범위로 고정.
     if not df.empty:
         fig.update_xaxes(range=[float(df["husband_age"].min()), float(df["husband_age"].max())])
-    fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title="남편 나이",
+    fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title=f"{_who()} 나이",
                       yaxis_title="월 금액(만원)", hovermode="x unified")
     return _style(fig)
 
@@ -105,7 +118,7 @@ def fig_cumulative_assets(sc: Scenario) -> go.Figure:
     fig.add_trace(go.Scatter(x=df["husband_age"], y=df["assets"] / _MAN,
                              name="금융자산 잔액", fill="tozeroy", line=dict(color=C_ASSET, width=2.2),
                              fillcolor="rgba(124,58,237,0.12)"))
-    fig.update_layout(title="② 연령별 누적자산", xaxis_title="남편 나이",
+    fig.update_layout(title="② 연령별 누적자산", xaxis_title=f"{_who()} 나이",
                       yaxis_title="금융자산(만원)", hovermode="x unified")
     return _style(fig)
 
@@ -230,7 +243,7 @@ def fig_heatmap(df: pd.DataFrame, value: str = "shortfall_total") -> go.Figure:
     pivot = sub.pivot_table(index="h_claim", columns="housing", values=value, aggfunc="min")
     fig = px.imshow(
         pivot / _MAN,
-        labels=dict(x="주택연금 개시나이", y="남편 국민연금 수령나이", color="부족액(만원)"),
+        labels=dict(x="주택연금 개시나이", y=f"{_who()} 연금 수령나이", color="부족액(만원)"),
         color_continuous_scale="RdYlGn_r",
         aspect="auto",
         text_auto=".0f",
@@ -267,7 +280,7 @@ def fig_best_by_life(df: pd.DataFrame) -> go.Figure:
     # 각 막대 위에 채택된 수령나이 조합 주석.
     for _, r in df.iterrows():
         fig.add_annotation(x=r["life"], y=(r["total_pv"] / _MAN),
-                           text=f"국민{int(r['h_claim'])}/{int(r['w_claim'])}세",
+                           text=f"국민{_claims(r['h_claim'], r['w_claim'])}",
                            showarrow=False, yshift=12, font=dict(size=10))
     fig.update_layout(title="⑦ 기대수명별 유리한 전략 비교", barmode="group",
                       xaxis_title="기대수명(세)", yaxis_title="금액(만원)")
@@ -299,7 +312,7 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
         x=df["total_pv"] / _MAN, y=df["shortfall_total"] / _MAN,
         mode="markers", name="전체 조합",
         marker=dict(color="lightgray", size=6),
-        text=[f"국민{h}/{w}세" for h, w in zip(df["h_claim"], df["w_claim"])],
+        text=[f"국민{_claims(h, w)}" for h, w in zip(df["h_claim"], df["w_claim"])],
     ))
     # 파레토 경계(빨간 선+점).
     fig.add_trace(go.Scatter(
@@ -320,7 +333,7 @@ def fig_pareto(df: pd.DataFrame, pareto: pd.DataFrame, best_id: int | None = Non
         ))
         fig.add_annotation(
             x=bx, y=by,
-            text=f"추천: 부족 0 + 최대수령<br>국민 {int(b['h_claim'])}/{int(b['w_claim'])}세 · {housing}",
+            text=f"추천: 부족 0 + 최대수령<br>국민 {_claims(b['h_claim'], b['w_claim'])} · {housing}",
             showarrow=True, arrowhead=2, ax=30, ay=40,
             font=dict(size=12, color="#1A1A1A"), bgcolor="rgba(255,255,255,0.95)",
             bordercolor=C_ACCENT, borderwidth=2, borderpad=4,
@@ -352,7 +365,7 @@ def fig_montecarlo_fan(mc) -> go.Figure:
                              line=dict(color=C_INCOME, width=2.5), name="중앙값(p50)"))
     fig.update_layout(
         title=f"변동성 스트레스: 나이별 자산 분위 (변동성 {mc['volatility']*100:.0f}%, {mc['n_sims']}회)",
-        xaxis_title="남편 나이", yaxis_title="금융자산(만원)", hovermode="x unified")
+        xaxis_title=f"{_who()} 나이", yaxis_title="금융자산(만원)", hovermode="x unified")
     return _style(fig)
 
 
@@ -363,7 +376,7 @@ def _combo_label(row) -> str:
     housing = "주택 미사용"
     if use_h and row.get("housing") is not None and not pd.isna(row.get("housing")):
         housing = f"주택 {int(row['housing'])}세"
-    return f"국민 {int(row['h_claim'])}/{int(row['w_claim'])}세 · {housing}"
+    return f"국민 {_claims(row['h_claim'], row['w_claim'])} · {housing}"
 
 
 def fig_score_scatter(df: pd.DataFrame, view: str = "stable",

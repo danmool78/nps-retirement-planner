@@ -20,7 +20,7 @@ def _eok(v: float) -> str:
 
 ROWS = [
     ("은퇴나이 · 월 생활비", "inputs", lambda m: m, None),
-    ("추천 연금 개시(남편/아내)", "claims", lambda m: m, None),
+    ("추천 연금 개시", "claims", lambda m: m, None),
     ("주택연금 개시", "housing", lambda m: m, None),
     ("생활비 부족", "shortfall_total",
      lambda v: "없음" if v <= 0 else f"{_eok(v)} 부족", "min"),
@@ -38,7 +38,8 @@ def summarize(name: str, query: str, user, R) -> dict:
         "name": name,
         "query": query,
         "inputs": f"{user.retirement_age}세 · {user.living_expense_monthly/1e4:,.0f}만원",
-        "claims": f"{int(b['h_claim'])}세 / {int(b['w_claim'])}세",
+        "claims": (f"{int(b['h_claim'])}세" if user.is_single
+                   else f"{int(b['h_claim'])}세 / {int(b['w_claim'])}세"),
         "housing": f"{int(b['housing'])}세" if b["use_housing"] else "미사용",
         "shortfall_total": float(b["shortfall_total"]),
         "bequest": float(b["bequest"]),

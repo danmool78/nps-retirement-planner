@@ -70,9 +70,13 @@ def generate_strategies(
     infl = inflation_rate if inflation_rate is not None else user.inflation_rate
     h_life = husband_life if husband_life is not None else user.husband_life_expectancy
     w_life = wife_life if wife_life is not None else user.wife_life_expectancy
+    if user.is_single:   # 1인 가구: 배우자는 시작 시점에 없음(기대수명 고정)
+        w_life = user.wife_life_expectancy
 
     h_ages = _claim_age_range(user.husband, cfg, min_age=user.retirement_age)
     w_ages = _claim_age_range(user.wife, cfg, min_age=_wife_age_at_start(user))
+    if user.is_single:   # 1인 가구: 배우자 수령나이는 의미 없으니 하나만(조합 수 1/11)
+        w_ages = w_ages[:1]
 
     if housing_ages is None:
         # 가입 가능·은퇴 이후 나이부터 남편 은퇴+15년까지 3년 간격으로 탐색.
@@ -219,8 +223,9 @@ def what_if(user: UserInput, cfg: Config, strat: Strategy) -> pd.DataFrame:
         ("투자수익률 1%p 높이기", "투자", replace(user, investment_return=user.investment_return + 0.01), strat),
         ("투자수익률 1%p 낮아지면", "투자", replace(user, investment_return=max(0.0, user.investment_return - 0.01)), strat),
         ("물가가 1%p 더 오르면", "물가", user, replace(strat, inflation_rate=strat.inflation_rate + 0.01)),
-        ("둘 다 5년 더 오래 살면", "수명", user,
-         replace(strat, husband_life=strat.husband_life + 5, wife_life=strat.wife_life + 5)),
+        ("5년 더 오래 살면" if user.is_single else "둘 다 5년 더 오래 살면", "수명", user,
+         replace(strat, husband_life=strat.husband_life + 5,
+                 wife_life=strat.wife_life + (0 if user.is_single else 5))),
     ]
     if user.house_value > 0 and strat.use_housing:
         cases.append(("집값이 20% 내리면", "주택", with_house(0.8), strat))

@@ -166,6 +166,22 @@
         }
       ]
     },
+    "basic_criteria_single": {
+      "label": "기초연금 선정기준액(단독)",
+      "unit": "원",
+      "revises": "annual-01",
+      "source": "보건복지부 고시(매년 1월)",
+      "history": [
+        {
+          "from": "2025-01-01",
+          "value": 2280000
+        },
+        {
+          "from": "2026-01-01",
+          "value": 2470000
+        }
+      ]
+    },
     "basic_property_deduction": {
       "label": "기본재산액 공제(대도시)",
       "unit": "원",
