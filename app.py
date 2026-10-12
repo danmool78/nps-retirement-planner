@@ -179,6 +179,7 @@ def compute_pipeline(user: UserInput, cfg: Config) -> dict:
         "best_id": best_id,
         "best_scenario": simulate(user, best_strat, cfg, record=True),
         "margin": opt.inflation_safety_margin(user, cfg, best_strat),
+        "whatif": opt.what_if(user, cfg, best_strat),
         "montecarlo": mc.run(user, best_strat, cfg, user.investment_volatility,
                              n_sims=cfg.optimizer.mc_sims),
         "life_df": opt.best_strategy_by_life(user, cfg, "stable"),
@@ -661,6 +662,32 @@ def conclusion_html(user, cfg, R) -> str:
     return "".join(f"<p>{x}</p>" for x in lines)
 
 
+def whatif_html(d) -> str:
+    """what-if 결과를 행 목록 HTML 로. 기준(현재 그대로) 대비 남는 재산·부족 변화를 색으로 표시."""
+    base = d.iloc[0]
+
+    def delta(v, ref, good_if_up=True):
+        diff = v - ref
+        if abs(diff) < 1e6:   # 100만원 미만은 변화 없음으로
+            return '<span class="d0">변화 없음</span>'
+        cls = "dg" if (diff > 0) == good_if_up else "db"
+        return f'<span class="{cls}">{"+" if diff > 0 else "−"}{fmt_eok(abs(diff))}</span>'
+
+    rows = []
+    for i, r in d.iterrows():
+        if r["shortfall_months"] > 0:
+            sf = f'<span class="db">{r["shortfall_months"]:.0f}개월 · {fmt_eok(r["shortfall_total"])} 부족</span>'
+        else:
+            sf = '<span class="dg">부족 없음</span>'
+        cls = "wi base" if i == 0 else "wi"
+        rows.append(
+            f'<div class="{cls}"><div class="wl">{_html.escape(r["label"])}</div>'
+            f'<div class="wv"><span class="k">생활비</span>{sf}</div>'
+            f'<div class="wv"><span class="k">남는 재산</span><b>{fmt_eok(r["bequest"])}</b>'
+            f'{"" if i == 0 else delta(r["bequest"], base["bequest"])}</div></div>')
+    return f'<div class="wilist">{"".join(rows)}</div>'
+
+
 def margin_text(margin, cfg, user) -> tuple[str, str, str]:
     """물가 안전 마진 → (카드 값, 카드 보조문구, 리포트 문장)."""
     if margin is None:
@@ -827,7 +854,7 @@ def main():
 
         # 3) 탭 ---------------------------------------------------------------------
         # 탭 이름은 모바일 한 화면에 최대한 들어가도록 짧게.
-        tabs = st.tabs(["추천", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
+        tabs = st.tabs(["추천", "만약에", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
         report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
 
         with tabs[0]:
@@ -845,6 +872,14 @@ def main():
                 render_view(tops["bequest"], "bequest", df)
 
         with tabs[1]:
+            ui.section("scale", "무엇을 바꾸면 좋아지나",
+                       "추천 전략은 그대로 두고 조건을 하나씩 바꿨을 때 기대수명까지의 결과")
+            st.markdown(whatif_html(R["whatif"]), unsafe_allow_html=True)
+            st.caption("은퇴를 늦추는 경우는 그 기간 생활비를 근로소득으로 충당한다고 가정합니다. "
+                       "남는 재산은 사망 시점의 명목 금액이며, 조건이 바뀌면 최적 수령나이도 달라질 수 있으니 "
+                       "실제 적용 전에는 입력을 바꿔 다시 실행해 보세요.")
+
+        with tabs[2]:
             ui.section("coins", "추천 전략 월수입 구성", "세전 연금 → 세금·건보 차감 → 기초·주택연금 가산 (명목 금액)")
             bd = income_breakdown(best_scenario.frame)
             if bd:
@@ -872,7 +907,7 @@ def main():
             fig_mc = viz.fig_montecarlo_fan(MC)
             chart(fig_mc, "montecarlo")
 
-        with tabs[2]:
+        with tabs[3]:
             ui.section("chart", "현금흐름과 자산", "추천 전략(안정형 1위)의 나이별 흐름")
             # 사망 시점(남편 나이축)을 계산해 현금흐름 그래프에 표시.
             wife_start = user.retirement_age - (user.wife.birth_year - user.husband.birth_year)
@@ -885,7 +920,7 @@ def main():
             chart(fig_cf, "cashflow", g1)
             chart(fig_as, "assets", g2)
 
-        with tabs[3]:
+        with tabs[4]:
             ui.section("calendar", "나이별 누적 수령액과 원금확보 시점", "언제부터 받으면 몇 세에 낸 보험료를 회수하는지")
             h_lbl = f"남편·{pension.type_label(user.husband)}"
             w_lbl = f"아내·{pension.type_label(user.wife)}"
@@ -895,7 +930,7 @@ def main():
             chart(fig_h, "receipts", g3)
             chart(fig_w, "receipts", g4)
 
-        with tabs[4]:
+        with tabs[5]:
             ui.section("scale", "전략 비교·민감도", "주택연금 개시나이, 물가, 기대수명에 따라 결과가 어떻게 달라지는지")
             fig_hz = viz.fig_heatmap(df, "shortfall_total")
             g5, g6 = st.columns(2)
@@ -932,7 +967,7 @@ def main():
                         ("⑦ 기대수명별 전략", fig_li), ("⑧ Pareto Frontier", fig_pa),
                         ("⑨ 조합별 점수 산점도", fig_sc), ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
 
-        with tabs[5]:
+        with tabs[6]:
             ui.section("download", "내보내기", "리포트·표를 파일로 저장 (파일도 브라우저 안에서 생성됩니다)")
             summary = {
                 "n_combos": R["n"],

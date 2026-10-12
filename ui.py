@@ -189,6 +189,17 @@ svg.ic{vertical-align:-0.2em; flex:none;}
 .concl p:last-child{margin-bottom:0;}
 .concl b{color:var(--ink);}
 
+/* 만약에(what-if) 목록 */
+.wilist{display:flex; flex-direction:column; gap:8px; margin:.4rem 0 .6rem;}
+.wi{display:grid; grid-template-columns:minmax(180px,1.4fr) 1fr 1fr; gap:6px 14px; align-items:center;
+    border:1px solid var(--line); border-radius:12px; padding:11px 14px; background:#fff; font-size:.9rem;}
+.wi.base{background:var(--soft); border-style:dashed;}
+.wi .wl{font-weight:600; color:var(--ink);}
+.wi .wv{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; color:var(--ink2);
+        font-variant-numeric:tabular-nums;}
+.wi .k{color:var(--muted); font-size:.78rem;}
+.wi .dg{color:#047857; font-weight:600;} .wi .db{color:#B91C1C; font-weight:600;} .wi .d0{color:var(--muted);}
+
 /* 지표 카드 그리드 */
 .kgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:.4rem 0 .8rem;}
 .kcard{background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 16px;
@@ -282,6 +293,8 @@ table.pol .sm{color:var(--muted); font-size:.72rem;}
   .kcard .sub{font-size:.7rem;}
   .note{font-size:.82rem; padding:10px 12px;}
   .concl{padding:13px 14px;}
+  .wi{grid-template-columns:1fr 1fr; padding:10px 12px; font-size:.84rem;}
+  .wi .wl{grid-column:1 / -1;}
   .concl p{font-size:.88rem; line-height:1.65;}
   .concl p:first-of-type{font-size:.96rem;}
   .rank{grid-template-columns:1fr; gap:6px; padding:12px;}
