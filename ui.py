@@ -180,6 +180,15 @@ svg.ic{vertical-align:-0.2em; flex:none;}
         font-size:.95rem; margin:.4rem 0 .2rem;}
 .side-h svg{color:var(--brand);}
 
+/* 한눈에 보는 결론 */
+.concl{border:1px solid #BFDBFE; background:linear-gradient(180deg,#EFF6FF,#FFFFFF 70%); border-radius:16px;
+       padding:16px 18px; margin:.6rem 0 .4rem; box-shadow:0 1px 2px rgba(15,23,42,.04);}
+.concl-h{display:flex; align-items:center; gap:8px; color:var(--brand); font-weight:700; font-size:.88rem; margin-bottom:8px;}
+.concl p{margin:0 0 6px; color:var(--ink2); font-size:.95rem; line-height:1.7; word-break:keep-all;}
+.concl p:first-of-type{color:var(--ink); font-size:1.05rem;}
+.concl p:last-child{margin-bottom:0;}
+.concl b{color:var(--ink);}
+
 /* 지표 카드 그리드 */
 .kgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:.4rem 0 .8rem;}
 .kcard{background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 16px;
@@ -272,6 +281,9 @@ table.pol .sm{color:var(--muted); font-size:.72rem;}
   .kcard .val{font-size:1.08rem; margin-top:4px;}
   .kcard .sub{font-size:.7rem;}
   .note{font-size:.82rem; padding:10px 12px;}
+  .concl{padding:13px 14px;}
+  .concl p{font-size:.88rem; line-height:1.65;}
+  .concl p:first-of-type{font-size:.96rem;}
   .rank{grid-template-columns:1fr; gap:6px; padding:12px;}
   .rank .no{width:28px; height:28px; font-size:.85rem;}
   .rank .title{font-size:.93rem;}
@@ -340,6 +352,12 @@ def note(kind: str, text_html: str, target=st):
     """kind: info / good / warn / bad. text_html 은 신뢰된(코드에서 만든) HTML."""
     icon = {"info": "info", "good": "check", "warn": "alert", "bad": "alert"}[kind]
     _html(f'<div class="note {kind}">{svg(icon, 18)}<div>{text_html}</div></div>', target)
+
+
+def conclusion(body_html: str, target=st):
+    """결과 맨 위 '한눈에 보는 결론' 카드. body_html 은 코드에서 만든 <p> 문단들."""
+    _html(f'<div class="concl"><div class="concl-h">{svg("target", 18)}<span>한눈에 보는 결론</span></div>'
+          f'{body_html}</div>', target)
 
 
 def kpi(icon: str, label: str, value: str, sub: str = "", tone: str = "brand", highlight=False) -> str:

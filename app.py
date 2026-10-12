@@ -603,6 +603,64 @@ def render_view(top, view: str, df):
     st.markdown("".join(cards), unsafe_allow_html=True)
 
 
+def _claim_phrase(age: int, normal: int) -> str:
+    """'68세(정상보다 4년 늦춤)' 같은 표현."""
+    d = age - normal
+    if d > 0:
+        return f"{age}세(정상 {normal}세보다 {d}년 늦춤)"
+    if d < 0:
+        return f"{age}세(정상 {normal}세보다 {-d}년 앞당김)"
+    return f"{age}세(정상 개시)"
+
+
+def conclusion_html(user, cfg, R) -> str:
+    """결과를 쉬운 말 몇 문장으로 요약(안정형 1위 기준). 모든 값은 코드에서 만든 숫자라 안전."""
+    tops = R["tops"]
+    b = tops["stable"].iloc[0]
+    hc, wc = int(b["h_claim"]), int(b["w_claim"])
+    hn = pension.normal_start_age(user.husband, cfg)
+    wn = pension.normal_start_age(user.wife, cfg)
+    house = (f"주택연금은 남편 {int(b['housing'])}세에 시작하는" if b["use_housing"]
+             else "주택연금은 쓰지 않는")
+
+    lines = [f"<b>남편은 {_claim_phrase(hc, hn)}, 아내는 {_claim_phrase(wc, wn)}부터 연금을 받고, "
+             f"{house} 것이 가장 안정적입니다.</b>"]
+
+    life = f"기대수명(남편 {user.husband_life_expectancy}세·아내 {user.wife_life_expectancy}세)"
+    if float(b["shortfall_months"]) == 0:
+        lines.append(f"이렇게 하면 {life}까지 생활비가 모자라지 않고, 마지막에 약 <b>{fmt_eok(b['bequest'])}</b>을 남깁니다.")
+    else:
+        dep = b.get("depletion_age")
+        when = f"{dep:.0f}세쯤 금융자산이 바닥나 " if dep == dep and dep is not None else ""
+        lines.append(f"다만 {life}까지 가면 {when}<b>{b['shortfall_months']:.0f}개월</b>, 총 "
+                     f"<b>{fmt_eok(b['shortfall_total'])}</b>이 부족합니다. 생활비를 줄이거나 은퇴를 늦추는 등의 조정이 필요합니다.")
+
+    cautions = []
+    sr = R["montecarlo"]["success_rate"] * 100
+    if sr < 80 and float(b["shortfall_months"]) == 0:   # 이미 부족이면 위 문장으로 충분
+        cautions.append(f"투자 수익이 해마다 흔들리면 끝까지 버틸 확률이 <b>{sr:.0f}%</b>로 낮아집니다")
+    margin = R["margin"]
+    if margin is not None and margin < cfg.optimizer.margin_max_inflation and margin < user.inflation_rate + 0.01:
+        cautions.append(f"물가가 연 <b>{margin*100:.1f}%</b>를 넘으면 부족이 생기기 시작합니다")
+    if cautions:
+        lines.append("주의할 점: " + ", ".join(cautions) + ".")
+
+    # 다른 성향이면 무엇이 달라지는지 한 줄.
+    m, q = tops["maximize"].iloc[0], tops["bequest"].iloc[0]
+    alts = []
+    # 차이가 1% 미만이면 의미 없는 잡음이라 생략.
+    same = lambda r: (int(r["h_claim"]), int(r["w_claim"]), housing_text(r)) == (hc, wc, housing_text(b))
+    if not same(m) and m["total_pv"] > b["total_pv"] * 1.01:
+        alts.append(f"평생 받는 총액을 가장 늘리려면 남편 {int(m['h_claim'])}세·아내 {int(m['w_claim'])}세, "
+                    f"주택연금 {housing_text(m)} (총수령 {fmt_eok(m['total_pv'] - b['total_pv'])} 더)")
+    if not same(q) and q["bequest"] > b["bequest"] * 1.01:
+        alts.append(f"남길 재산을 가장 늘리려면 남편 {int(q['h_claim'])}세·아내 {int(q['w_claim'])}세, "
+                    f"주택연금 {housing_text(q)} (상속 {fmt_eok(q['bequest'] - b['bequest'])} 더)")
+    if alts:
+        lines.append("참고로 " + ", ".join(alts) + "가 유리합니다.")
+    return "".join(f"<p>{x}</p>" for x in lines)
+
+
 def margin_text(margin, cfg, user) -> tuple[str, str, str]:
     """물가 안전 마진 → (카드 값, 카드 보조문구, 리포트 문장)."""
     if margin is None:
@@ -742,7 +800,8 @@ def main():
         m_val, m_sub, m_report = margin_text(R["margin"], cfg, user)
         infl_list = ", ".join(f"{x*100:.0f}%" for x in cfg.optimizer.robust_inflations)
 
-        # 2) 핵심 요약 --------------------------------------------------------------
+        # 2) 한눈에 보는 결론 + 핵심 요약 -------------------------------------------
+        ui.conclusion(conclusion_html(user, cfg, R))
         ui.section("target", "핵심 요약",
                    f"{R['n']:,}개 조합 평가 · 물가 {infl_list} 스트레스 반영 · 안정형 1위 기준")
         sr = MC["success_rate"] * 100
