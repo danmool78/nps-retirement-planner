@@ -40,6 +40,18 @@
     <script type="module">
       import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.2/build/stlite.js";
 
+      // 입력값 기억: 주소에 입력값이 없으면 지난번 마지막 입력(브라우저 저장소)을 복원하고,
+      // 이후 앱이 주소를 바꿀 때마다 저장한다. (입력 초기화로 주소가 비면 저장도 지운다)
+      const SAVE_KEY = "nps_planner_inputs_v1";
+      try {
+        const saved = localStorage.getItem(SAVE_KEY);
+        if (!location.search && saved) history.replaceState(null, "", location.pathname + saved + location.hash);
+      } catch (e) {}
+      setInterval(() => {
+        try { location.search ? localStorage.setItem(SAVE_KEY, location.search) : localStorage.removeItem(SAVE_KEY); }
+        catch (e) {}
+      }, 1500);
+
       // 앱 소스와 제도 파라미터(policy.json)를 같은 사이트에서 불러온다.
       // ?v= 로 캐시를 우회해, policy.json 갱신이 다음 접속 때 바로 반영되게 한다.
       const v = Date.now();

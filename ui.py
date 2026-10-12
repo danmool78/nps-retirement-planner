@@ -81,6 +81,11 @@ _PATHS = {
     "browser": '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 8.5h17"/>'
                '<circle cx="6.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="6.5" r=".5" fill="currentColor"/>'
                '<path d="m9.5 13 2 2-2 2M13.5 17h3"/>',
+    # 링크(공유)
+    "link": '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/>'
+            '<path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+    # 되돌리기(초기화)
+    "reset": '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/>',
     # 자물쇠(개인정보)
     "lock": '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
 }
@@ -417,11 +422,69 @@ _SIDEBAR_JS = """
 """
 
 
+def _frame(code: str, height: int = 1, target=st):
+    """같은 출처 iframe 으로 HTML/스크립트를 넣는다. height=1 이면 CSS 로 자리를 숨긴다.
+    최신 Streamlit 은 st.iframe, 브라우저 실행(stlite) 쪽 구버전은 components.html 을 쓴다."""
+    if hasattr(st, "iframe"):
+        target.iframe(code, height=height)
+    else:
+        with target:
+            components.html(code, height=height)
+
+
 def sidebar_action(action: str):
     """'open' / 'close'(모바일 폭에서만). 매번 다른 내용으로 렌더해 스크립트가 다시 실행되게 한다."""
-    code = _SIDEBAR_JS % action + f"<!-- {time.time()} -->"
-    # 최신 Streamlit 은 st.iframe, 브라우저 실행(stlite) 쪽 구버전은 components.html 을 쓴다.
-    if hasattr(st, "iframe"):
-        st.iframe(code, height=1)
-    else:
-        components.html(code, height=1)
+    _frame(_SIDEBAR_JS % action + f"<!-- {time.time()} -->")
+
+
+_URL_JS = """
+<script>
+(function(){
+  const w = window.parent;
+  const want = %s;
+  const cur = w.location.search;
+  if (cur !== want) w.history.replaceState(w.history.state, "", w.location.pathname + want + w.location.hash);
+})();
+</script>
+"""
+
+
+def sync_url(query: str):
+    """현재 입력을 주소창 URL 에 반영(새로고침 유지·링크 공유용). 내용이 같으면 다시 실행되지 않는다."""
+    import json
+    _frame(_URL_JS % json.dumps(("?" + query) if query else ""))
+
+
+_SHARE_HTML = """
+<style>
+  html,body{margin:0;background:transparent;font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;}
+  button{width:100%%;height:40px;border-radius:10px;border:1px solid #C3CEDD;background:#fff;color:#0F172A;
+         font:inherit;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;}
+  button:hover{border-color:#1D4ED8;color:#1D4ED8;}
+  button.ok{border-color:#059669;color:#059669;}
+</style>
+<button id="b" type="button">%s<span id="t">링크 복사</span></button>
+<script>
+  const b = document.getElementById("b"), t = document.getElementById("t");
+  b.onclick = async () => {
+    const url = window.parent.location.href;
+    let ok = false;
+    try { await navigator.clipboard.writeText(url); ok = true; } catch (e) {}
+    if (!ok) {
+      try {   // 클립보드 권한이 없으면 부모 문서에 임시 입력칸을 만들어 복사
+        const d = window.parent.document, a = d.createElement("textarea");
+        a.value = url; a.style.position = "fixed"; a.style.opacity = "0"; d.body.appendChild(a);
+        a.select(); ok = d.execCommand("copy"); d.body.removeChild(a);
+      } catch (e) {}
+    }
+    if (!ok) { window.parent.prompt("아래 링크를 복사하세요", url); ok = true; }
+    b.classList.add("ok"); t.textContent = "복사됨";
+    setTimeout(() => { b.classList.remove("ok"); t.textContent = "링크 복사"; }, 1800);
+  };
+</script>
+"""
+
+
+def share_button(target=st):
+    """현재 입력이 담긴 주소를 복사하는 버튼(받은 사람이 열면 같은 입력으로 시작)."""
+    _frame(_SHARE_HTML % svg("link", 16), height=42, target=target)

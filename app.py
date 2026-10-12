@@ -197,29 +197,153 @@ PENSION_TYPES = {
     "교직원연금(사학연금)": "teacher",
     "공무원연금": "gov",
 }
+SURV_MODES = {
+    "자동(유리한 쪽 선택)": "auto",
+    "본인연금 + 유족 일부": "own_plus",
+    "유족연금 전액(본인 포기)": "survivor_full",
+}
+BASIC_MODES = {
+    "자동 판정(소득인정액 기준)": "auto",
+    "무조건 수급": "on",
+    "무조건 미수급": "off",
+}
 # 국민연금 월액 → 월소득 역산 근사(소득대체율 약 33% 가정 → 소득 ≈ 연금월액 × 3).
 NPS_TO_INCOME_MULT = 3.0
 
 
-def person_inputs(key: str, defaults: dict, P: dict):
+# ---------------------------------------------------------------------------
+# 입력값 기억·공유
+# - 사용자 입력(제도 파라미터 제외)을 주소창 URL 쿼리에 실시간으로 기록한다(기본값과 다른 값만).
+#   → 새로고침해도 유지되고, 주소를 그대로 보내면 같은 입력으로 열린다.
+# - 브라우저 버전(index.html)은 마지막 주소를 브라우저 저장소에 기억해 다음 방문 때 복원한다.
+# - 제도 파라미터(보험료율·기초연금액 등)는 저장하지 않는다. 저장하면 옛 값이 고정돼 자동 갱신이 막힌다.
+# ---------------------------------------------------------------------------
+# URL 코드 → (위젯 key, 종류, 기본값, 최소, 최대). 종류: int / float / bool / 선택지 dict(라벨→코드)
+PERSIST = {
+    "hpt": ("hpt", PENSION_TYPES, "국민연금", None, None),
+    "hb": ("hb", "int", 1965, 1940, 2000),
+    "hl": ("hl", "int", 86, 70, 110),
+    "hn": ("hn", "int", 1_100_000, 0, 5_000_000),
+    "hpp": ("hpp", "int", 10_000, 0, 100_000),
+    "hcy": ("hcy", "int", 0, 0, 20),
+    "wpt": ("wpt", PENSION_TYPES, "국민연금", None, None),
+    "wb": ("wb", "int", 1967, 1940, 2000),
+    "wl": ("wl", "int", 90, 70, 110),
+    "wn": ("wn", "int", 700_000, 0, 5_000_000),
+    "wpp": ("wpp", "int", 8_000, 0, 100_000),
+    "wcy": ("wcy", "int", 0, 0, 20),
+    "ra": ("ra", "int", 60, 50, 75),
+    "lv": ("lv", "int", 300, 0, 2_000),
+    "as": ("as", "float", 2.0, 0.0, 500.0),
+    "ir": ("ir", "float", 3.0, 0.0, 10.0),
+    "inf": ("inf", "float", 2.0, 0.0, 6.0),
+    "vol": ("vol", "float", 10.0, 0.0, 40.0),
+    "oi": ("oi", "int", 0, 0, 2_000),
+    "oie": ("oie", "int", 100, 55, 110),
+    "op": ("op", "float", 0.0, 0.0, 500.0),
+    "sr": ("sr", "float", 0.65, 0.4, 1.0),
+    "sm": ("sm", SURV_MODES, "자동(유리한 쪽 선택)", None, None),
+    "bm": ("bm", BASIC_MODES, "자동 판정(소득인정액 기준)", None, None),
+    "uh": ("uh", "bool", True, None, None),
+    "hv": ("hv", "float", 5.0, 0.0, 500.0),
+    "ah": ("ah", "bool", True, None, None),
+    "hm": ("hm", "int", 120, 0, 1_000),
+    "tx": ("tx", "float", 4.0, 0.0, 30.0),
+    "hi": ("hi", "float", 4.0, 0.0, 20.0),
+    "dr": ("dr", "float", 2.0, 0.0, 10.0),
+}
+_SPEC_BY_KEY = {spec[0]: spec for spec in PERSIST.values()}
+
+
+def _parse(raw: str, spec):
+    """URL 문자열 → 위젯 값. 잘못된 값이면 None(무시)."""
+    _, kind, _, lo, hi = spec
+    try:
+        if isinstance(kind, dict):
+            label = {code: lab for lab, code in kind.items()}.get(raw)
+            return label
+        if kind == "bool":
+            return raw == "1"
+        val = int(float(raw)) if kind == "int" else float(raw)
+        return min(max(val, lo), hi)   # 범위 밖이면 위젯이 오류를 내므로 잘라낸다
+    except (TypeError, ValueError):
+        return None
+
+
+def _encode(val, spec) -> str:
+    kind = spec[1]
+    if isinstance(kind, dict):
+        return kind.get(val, "")
+    if kind == "bool":
+        return "1" if val else "0"
+    if kind == "int":
+        return str(int(val))
+    return f"{float(val):g}"
+
+
+def restore_inputs_from_url():
+    """세션 첫 실행 때만 URL 쿼리의 입력값을 위젯 상태로 넣는다."""
+    if st.session_state.get("_restored"):
+        return
+    st.session_state["_restored"] = True
+    for code, spec in PERSIST.items():
+        raw = st.query_params.get(code)
+        if raw is None:
+            continue
+        val = _parse(raw, spec)
+        if val is not None:
+            st.session_state[spec[0]] = val
+
+
+def current_query() -> str:
+    """현재 입력 중 기본값과 다른 것만 쿼리 문자열로."""
+    from urllib.parse import urlencode
+    out = {}
+    for code, spec in PERSIST.items():
+        key, _, default = spec[0], spec[1], spec[2]
+        if key in st.session_state and st.session_state[key] != default:
+            out[code] = _encode(st.session_state[key], spec)
+    return urlencode(out)
+
+
+def reset_inputs():
+    """입력 초기화: 저장 대상 입력을 기본값으로 되돌린다.
+    (상태를 지우기만 하면 화면의 입력칸이 이전 값을 다시 보내므로, 기본값을 직접 넣는다.)"""
+    for spec in PERSIST.values():
+        st.session_state[spec[0]] = spec[2]
+    for k in ("hinc", "winc", "preview_age"):
+        st.session_state.pop(k, None)
+
+
+def dv(key: str) -> dict:
+    """위젯 기본값 인자. 이미 상태(URL 복원·사용자 입력)가 있으면 value 를 넘기지 않는다
+    (넘기면 Streamlit 이 '기본값과 세션 상태가 동시에 지정됨' 경고를 띄운다)."""
+    return {} if key in st.session_state else {"value": _SPEC_BY_KEY[key][2]}
+
+
+def person_inputs(key: str, P: dict):
     """남편/아내 한 사람의 입력 위젯. 반환: (Person 생성 인자 dict, 기대수명)."""
     income_cap = P.get("nps_income_cap", 6_170_000)
     premium_rate = P.get("nps_premium_rate", 0.09)
 
     ptype = PENSION_TYPES[st.selectbox("연금 종류", list(PENSION_TYPES), key=f"{key}pt")]
     c1, c2 = st.columns(2)
-    birth = c1.number_input("출생연도", 1940, 2000, defaults["birth"], key=f"{key}b")
-    life = c2.number_input("기대수명(세)", 70, 110, defaults["life"], key=f"{key}l")
-    monthly = st.number_input("정상개시 기준 연금 월액(원)", 0, 5_000_000, defaults["monthly"], 50_000,
-                              key=f"{key}n", help="연금공단 예상연금 조회의 '정상 수령나이 기준 월액'")
-    principal = st.number_input("지금까지 낸 보험료 총액(만원)", 0, 100_000, defaults["principal"], 100,
-                                key=f"{key}pp", help="원금확보(손익분기) 시점 계산에 사용") * 10_000
+    birth = c1.number_input("출생연도", 1940, 2000, key=f"{key}b", **dv(f"{key}b"))
+    life = c2.number_input("기대수명(세)", 70, 110, key=f"{key}l", **dv(f"{key}l"))
+    monthly = st.number_input("정상개시 기준 연금 월액(원)", 0, 5_000_000, step=50_000,
+                              key=f"{key}n", help="연금공단 예상연금 조회의 '정상 수령나이 기준 월액'",
+                              **dv(f"{key}n"))
+    principal = st.number_input("지금까지 낸 보험료 총액(만원)", 0, 100_000, step=100,
+                                key=f"{key}pp", help="원금확보(손익분기) 시점 계산에 사용",
+                                **dv(f"{key}pp")) * 10_000
 
     # 추납은 국민연금 전용 → 직역연금(교직원·공무원)이면 비활성화.
     db_type = ptype != "nps"
     c3, c4 = st.columns(2)
-    chunap_y = c3.number_input("추납 기간(년)", 0, 20, 0, key=f"{key}cy", disabled=db_type,
-                               help="추납으로 메우는 가입연수(연금 증가를 결정). 국민연금만 해당")
+    chunap_y = c3.number_input("추납 기간(년)", 0, 20, key=f"{key}cy", disabled=db_type,
+                               help="추납으로 메우는 가입연수(연금 증가를 결정). 국민연금만 해당",
+                               **dv(f"{key}cy"))
+    # 월 소득은 연금 월액에서 역산한 값을 기본으로 따라가게(저장하지 않음).
     income = c4.number_input("월 소득(만원)", 0, 1_000,
                              int(min(monthly * NPS_TO_INCOME_MULT, income_cap) / 10_000), 10,
                              key=f"{key}inc", disabled=db_type,
@@ -244,57 +368,52 @@ def build_inputs(P: dict):
     ui.side_header("couple", "부부 정보")
     t_h, t_w = sb.tabs(["남편", "아내"])
     with t_h:
-        h_args, h_life = person_inputs("h", dict(birth=1965, life=86, monthly=1_100_000, principal=10_000), P)
+        h_args, h_life = person_inputs("h", P)
     with t_w:
-        w_args, w_life = person_inputs("w", dict(birth=1967, life=90, monthly=700_000, principal=8_000), P)
+        w_args, w_life = person_inputs("w", P)
 
     # --- 생활·자산 -------------------------------------------------------------
     sb.divider()
     ui.side_header("wallet", "생활·자산")
     c1, c2 = sb.columns(2)
-    retire_age = c1.number_input("은퇴나이(남편)", 50, 75, 60)
-    living = c2.number_input("월 생활비(만원)", 0, 2_000, 300, 10, help="부부 합산, 현재가치") * 10_000
-    assets = c1.number_input("금융자산(억원)", 0.0, 500.0, 2.0, 0.1) * 100_000_000
-    invest = c2.number_input("투자수익률(%)", 0.0, 10.0, 3.0, 0.5) / 100
-    inflation = c1.number_input("물가상승률(%)", 0.0, 6.0, 2.0, 0.5) / 100
-    volatility = c2.number_input("투자 변동성(%)", 0.0, 40.0, 10.0, 1.0,
-                                 help="수익률의 연 표준편차. 클수록 폭락 위험이 큼(몬테카를로에 사용)") / 100
+    retire_age = c1.number_input("은퇴나이(남편)", 50, 75, key="ra", **dv("ra"))
+    living = c2.number_input("월 생활비(만원)", 0, 2_000, step=10, key="lv", help="부부 합산, 현재가치",
+                             **dv("lv")) * 10_000
+    assets = c1.number_input("금융자산(억원)", 0.0, 500.0, step=0.1, key="as", **dv("as")) * 100_000_000
+    invest = c2.number_input("투자수익률(%)", 0.0, 10.0, step=0.5, key="ir", **dv("ir")) / 100
+    inflation = c1.number_input("물가상승률(%)", 0.0, 6.0, step=0.5, key="inf", **dv("inf")) / 100
+    volatility = c2.number_input("투자 변동성(%)", 0.0, 40.0, step=1.0, key="vol",
+                                 help="수익률의 연 표준편차. 클수록 폭락 위험이 큼(몬테카를로에 사용)",
+                                 **dv("vol")) / 100
 
     with sb.expander("기타 소득·재산"):
-        other_income = st.number_input("기타 월소득(만원)", 0, 2_000, 0, 10,
-                                       help="연금 외 근로·임대·이자·개인/퇴직연금 등. 현금흐름과 기초연금 판정에 반영") * 10_000
-        other_income_end = st.number_input("기타소득 유지나이", 55, 110, 100,
-                                           help="근로소득처럼 끝나면 낮게, 임대·연금이면 높게(평생=100)")
-        other_property = st.number_input("기타 재산(억원)", 0.0, 500.0, 0.0, 0.1,
-                                         help="주택·금융자산 외 다른 부동산·자동차 등. 기초연금 판정·상속에 반영") * 100_000_000
-        single_ratio = st.number_input("홀로 생존 시 생활비 비율", 0.4, 1.0, 0.65, 0.05,
-                                       help="1인 가구 생활비 / 부부 생활비")
+        other_income = st.number_input("기타 월소득(만원)", 0, 2_000, step=10, key="oi",
+                                       help="연금 외 근로·임대·이자·개인/퇴직연금 등. 현금흐름과 기초연금 판정에 반영",
+                                       **dv("oi")) * 10_000
+        other_income_end = st.number_input("기타소득 유지나이", 55, 110, key="oie",
+                                           help="근로소득처럼 끝나면 낮게, 임대·연금이면 높게(평생=100)",
+                                           **dv("oie"))
+        other_property = st.number_input("기타 재산(억원)", 0.0, 500.0, step=0.1, key="op",
+                                         help="주택·금융자산 외 다른 부동산·자동차 등. 기초연금 판정·상속에 반영",
+                                         **dv("op")) * 100_000_000
+        single_ratio = st.number_input("홀로 생존 시 생활비 비율", 0.4, 1.0, step=0.05, key="sr",
+                                       help="1인 가구 생활비 / 부부 생활비", **dv("sr"))
 
     with sb.expander("유족연금·기초연금 처리"):
-        SURV_MODES = {
-            "자동(유리한 쪽 선택)": "auto",
-            "본인연금 + 유족 일부": "own_plus",
-            "유족연금 전액(본인 포기)": "survivor_full",
-        }
         survivor_mode = SURV_MODES[st.selectbox(
-            "배우자 사망 시 유족연금", list(SURV_MODES),
+            "배우자 사망 시 유족연금", list(SURV_MODES), key="sm",
             help="본인 노령연금+유족연금 일부 vs 유족연금 전액 중 무엇을 받을지. 자동은 유리한 쪽을 택합니다.")]
-        BASIC_MODES = {
-            "자동 판정(소득인정액 기준)": "auto",
-            "무조건 수급": "on",
-            "무조건 미수급": "off",
-        }
         basic_mode = BASIC_MODES[st.selectbox(
-            "기초연금", list(BASIC_MODES),
+            "기초연금", list(BASIC_MODES), key="bm",
             help="자동 판정: 입력한 연금·주택·자산으로 소득인정액을 계산해 대상이면 반영, 아니면 제외합니다.")]
 
     # --- 주택연금 --------------------------------------------------------------
     sb.divider()
     ui.side_header("home", "주택연금")
-    use_house = sb.toggle("주택연금 사용", True)
-    house_val = sb.number_input("주택가격(억원)", 0.0, 500.0, 5.0, 0.1) * 100_000_000
-    auto_house = sb.toggle("주택가격으로 월지급액 자동 산정", True,
-                           help="HF 종신·정액형 표 기준. 가입 상한(공시가격 기준) 자동 적용.")
+    use_house = sb.toggle("주택연금 사용", key="uh", **dv("uh"))
+    house_val = sb.number_input("주택가격(억원)", 0.0, 500.0, step=0.1, key="hv", **dv("hv")) * 100_000_000
+    auto_house = sb.toggle("주택가격으로 월지급액 자동 산정", key="ah",
+                           help="HF 종신·정액형 표 기준. 가입 상한(공시가격 기준) 자동 적용.", **dv("ah"))
     house_cap = P.get("housing_price_cap", 1_200_000_000)
     hp_kwargs = dict(house_price_cap=house_cap)
     if "housing_monthly_per_100m" in P:
@@ -304,7 +423,7 @@ def build_inputs(P: dict):
         # 내부 기준월지급액은 60세 기준으로 저장(시뮬레이션이 개시나이별로 환산).
         house_monthly = int(hp.estimate_base_monthly(house_val, _hpol))
         # HF 계산기와 직접 비교되도록 '개시 예정나이(연소자 기준)'의 월지급액을 미리보기로 표시.
-        preview_age = sb.slider("미리보기 개시나이(부부 중 연소자)", 55, 90, 70,
+        preview_age = sb.slider("미리보기 개시나이(부부 중 연소자)", 55, 90, 70, key="preview_age",
                                 help="HF 계산기는 부부 중 연소자 나이 기준입니다.")
         preview = hp.monthly_payment(house_monthly, preview_age, _hpol)
         ui.note("info", f"{preview_age}세 개시 시 예상 월지급액 <b>{preview:,.0f}원</b>"
@@ -314,7 +433,8 @@ def build_inputs(P: dict):
             ui.note("warn", f"주택가격이 가입 상한({house_cap/1e8:g}억)을 넘어 상한 기준으로 산정합니다.",
                     target=sb)
     else:
-        house_monthly = sb.number_input("주택연금 기준월지급액(만원)", 0, 1_000, 120, 5) * 10_000
+        house_monthly = sb.number_input("주택연금 기준월지급액(만원)", 0, 1_000, step=5, key="hm",
+                                        **dv("hm")) * 10_000
 
     # --- 제도 파라미터 ---------------------------------------------------------
     sb.divider()
@@ -337,17 +457,17 @@ def build_inputs(P: dict):
         dup = st.number_input("유족연금 중복조정률(%)", 0.0, 100.0,
                               P.get("survivor_dup_rate", 0.30) * 100, 5.0,
                               help="본인 노령연금 선택 시 함께 받는 유족연금 비율") / 100
-        discount = st.number_input("현재가치 할인율(%)", 0.0, 10.0, 2.0, 0.5) / 100
+        discount = st.number_input("현재가치 할인율(%)", 0.0, 10.0, step=0.5, key="dr", **dv("dr")) / 100
     with sb.expander("교직원·공무원연금"):
         t_early = st.number_input("교직원 조기퇴직 연감액률(%)", 0.0, 10.0, 5.0, 0.5, key="te") / 100
         t_surv = st.number_input("교직원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0, key="ts") / 100
         g_early = st.number_input("공무원 조기퇴직 연감액률(%)", 0.0, 10.0, 5.0, 0.5, key="ge") / 100
         g_surv = st.number_input("공무원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0, key="gs") / 100
     with sb.expander("세금·건보·기초연금"):
-        tax_rate = st.number_input("연금소득 실효세율(%)", 0.0, 30.0, 4.0, 0.5,
-                                   help="국민·직역·유족연금에 적용(주택연금·기초연금 제외)") / 100
-        health_rate = st.number_input("건강보험료율(연금 대비, %)", 0.0, 20.0, 4.0, 0.5,
-                                      help="은퇴 후 지역가입 근사") / 100
+        tax_rate = st.number_input("연금소득 실효세율(%)", 0.0, 30.0, step=0.5, key="tx",
+                                   help="국민·직역·유족연금에 적용(주택연금·기초연금 제외)", **dv("tx")) / 100
+        health_rate = st.number_input("건강보험료율(연금 대비, %)", 0.0, 20.0, step=0.5, key="hi",
+                                      help="은퇴 후 지역가입 근사", **dv("hi")) / 100
         basic_amt = st.number_input("기초연금 단독 월액(원)", 0, 1_000_000,
                                     int(P.get("basic_single_amount", 340_000)), 1_000) 
         basic_couple_red = st.number_input("부부 동시수급 감액률(%)", 0.0, 50.0,
@@ -538,7 +658,9 @@ def main():
     pol_data = policy.load()
     P = policy.current(pol_data)
     run_slot = st.sidebar.container()  # 실행 버튼을 입력창 맨 위에 두기 위한 자리
+    restore_inputs_from_url()          # 공유 링크·새로고침: URL 의 입력값을 먼저 위젯에 넣음
     user, cfg, basic_mode = build_inputs(P)
+    ui.sync_url(current_query())       # 바뀐 입력을 주소창에 반영
 
     late = policy.overdue(pol_data)
     if late:
@@ -564,6 +686,11 @@ def main():
         st.session_state["_sidebar"] = "open"
 
     run_slot.button("시뮬레이션 실행", type="primary", width="stretch", on_click=run, args=run_args, key="run_side")
+    s1, s2 = run_slot.columns(2)
+    ui.share_button(target=s1)
+    s2.button("입력 초기화", on_click=reset_inputs, key="reset_inputs", width="stretch",
+              help="모든 입력을 기본값으로 되돌립니다.")
+    run_slot.caption("입력값은 주소(URL)에 자동 저장됩니다. 링크를 보내면 같은 입력으로 열립니다.")
 
     # 본문 전체를 한 자리(body)에 그린다. 실행 직후에는 이 자리를 로딩 화면으로 통째로 바꿔
     # 이전 화면(시작 안내·이전 결과)이 로딩 아래에 남지 않게 하고, 화면을 전송한 뒤 곧바로 다시 실행해 계산한다.
