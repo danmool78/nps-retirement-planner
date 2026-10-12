@@ -265,7 +265,22 @@ class TaxPolicy:
     - 기초연금은 비과세(제외).
     """
     pension_tax_rate: float = 0.04        # 연금소득 실효세율(근사)
-    health_insurance_rate: float = 0.04   # 연금소득 대비 건강보험료율(지역가입 근사)
+    health_insurance_rate: float = 0.04   # (health_mode="flat" 일 때만) 연금소득 대비 건보료율
+
+    # --- 건강보험: 피부양자 판정 → 탈락 시 지역가입자 보험료(health_mode="auto", 기본) ---
+    # 최신값은 policy.json 에서 시행일별로 자동 선택된다. 아래는 2026년 기준 대체값.
+    health_mode: str = "auto"
+    health_rate: float = 0.0719                 # 건강보험료율(2026)
+    ltc_ratio: float = 0.1314                   # 장기요양보험료(건보료 대비, 2026: 0.9448%/7.19%)
+    dependent_income_limit: float = 20_000_000  # 피부양자 소득요건(연, 1인당)
+    dependent_property_limit: float = 540_000_000   # 재산세 과세표준 이 이하면 재산요건 충족
+    dependent_property_limit_high: float = 900_000_000  # 이 이하는 연소득 1,000만 이하일 때만 충족
+    dependent_income_limit_mid: float = 10_000_000
+    local_pension_ratio: float = 0.5            # 지역가입자 소득 산정 시 공적연금 반영률
+    property_deduction: float = 100_000_000     # 재산 보험료 기본공제(과세표준)
+    property_premium_per_100m: float = 45_000   # 공제 후 과세표준 1억당 월 재산보험료(점수표 근사)
+    house_tax_base_ratio: float = 0.31          # 주택 시가 → 재산세 과세표준(공시가 69% × 1주택 45%)
+    other_tax_base_ratio: float = 0.41          # 기타 부동산 시가 → 과세표준(공시가 69% × 60%)
 
 
 @dataclass
@@ -347,6 +362,9 @@ class UserInput:
     other_income_monthly: float = 0.0
     # 기타소득이 유지되는 남편 나이(근로소득처럼 끝나면 낮게, 임대·연금이면 높게/평생).
     other_income_end_age: int = 100
+
+    # 건강보험 피부양자로 올릴 직장가입자 가족(자녀 등)이 있는지. 없으면 처음부터 지역가입자.
+    health_dependent_possible: bool = True
 
     # 기타 재산(주택·금융자산 외: 다른 부동산·자동차·전월세보증금 등, 원).
     # 기초연금 소득인정액(재산환산)과 사망시 상속(잔여자산)에 반영된다.

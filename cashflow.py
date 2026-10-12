@@ -155,7 +155,14 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
     disc_base = 1.0 + r_disc
 
     # 세금·건보 실효율(공적연금 실수령 계수)과 기초연금 정책.
-    net_factor = max(0.0, 1.0 - cfg.tax.pension_tax_rate - cfg.tax.health_insurance_rate)
+    tx = cfg.tax
+    flat_health = tx.health_mode == "flat"
+    tax_rate = tx.pension_tax_rate + (tx.health_insurance_rate if flat_health else 0.0)
+    # 재산세 과세표준(근사, 시작 시점). 이후 주택가격 상승률로 키운다.
+    prop_base0 = user.house_value * tx.house_tax_base_ratio + user.other_property * tx.other_tax_base_ratio
+    health_total = 0.0
+    dep_lost_age: Optional[float] = None    # 피부양자 자격을 처음 잃는 나이(남편 나이축)
+    dep_lost_premium = 0.0                  # 그때의 월 건보료
     bp = cfg.basic
 
     # 부부 각자의 연금 계산 모듈/정책(국민연금 vs 교직원연금)을 미리 확정.
@@ -258,9 +265,9 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
                 house_base, years_since, strat.inflation_rate, cfg.housing
             )
 
-        # --- 3-b) 세금·건강보험료(공적연금·유족연금에만) → 실수령 반영 ---
-        taxable = h_pension + w_pension + survivor_extra  # 과세·건보 대상(주택연금 제외)
-        net_taxable = taxable * net_factor                # 세후·건보 후 실수령
+        # --- 3-b) 연금소득세(공적연금·유족연금에만, 주택연금 제외) ---
+        taxable = h_pension + w_pension + survivor_extra
+        net_taxable = taxable * (1.0 - tax_rate)          # 세후(건보료는 아래 3-e 에서 차감)
 
         # --- 3-c) 기초연금(65세 이상, 비과세). 부부 동시 수급 시 각 감액 ---
         basic_pension = 0.0
@@ -279,6 +286,27 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
         other_income = 0.0
         if (h_alive or w_alive) and user.other_income_monthly > 0 and h_age < user.other_income_end_age:
             other_income = user.other_income_monthly * ((1.0 + strat.inflation_rate) ** year_idx)
+
+        # --- 3-e) 건강보험료: 피부양자면 0, 아니면 지역가입자(소득분+재산분)×(1+장기요양) ---
+        health = 0.0
+        if not flat_health and (h_alive or w_alive):
+            h_inc = (h_pension + (survivor_extra if not w_alive else 0.0) + other_income) * 12 if h_alive else 0.0
+            w_inc = (w_pension + (survivor_extra if not h_alive else 0.0)) * 12 if w_alive else 0.0
+            incomes = [x for x, alive in ((h_inc, h_alive), (w_inc, w_alive)) if alive]
+            prop_base = prop_base0 * ((1.0 + cfg.housing.house_growth_rate) ** year_idx)
+            income_ok = all(x <= tx.dependent_income_limit for x in incomes)   # 부부 중 한 명이라도 넘으면 둘 다 탈락
+            prop_ok = (prop_base <= tx.dependent_property_limit or
+                       (prop_base <= tx.dependent_property_limit_high and
+                        all(x <= tx.dependent_income_limit_mid for x in incomes)))
+            if not (user.health_dependent_possible and income_ok and prop_ok):
+                income_part = (taxable * tx.local_pension_ratio + other_income) * tx.health_rate
+                prop_part = max(0.0, prop_base - tx.property_deduction) / 100_000_000 * tx.property_premium_per_100m
+                health = (income_part + prop_part) * (1.0 + tx.ltc_ratio)
+                if dep_lost_age is None:
+                    dep_lost_age = round(h_age, 1)
+                    dep_lost_premium = health
+            net_taxable -= health
+            health_total += health
 
         # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금 + 기타소득).
         income = net_taxable + basic_pension + house_income + other_income
@@ -323,7 +351,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
                 "husband_age": round(h_age, 2), "wife_age": round(w_age, 2),
                 "h_pension": h_pension, "w_pension": w_pension,
                 "survivor_pension": survivor_extra, "basic_pension": basic_pension,
-                "net_taxable": net_taxable, "house_income": house_income,
+                "net_taxable": net_taxable, "house_income": house_income, "health": health,
                 "other_income": other_income,
                 "income": income, "expense": expense, "net": net,
                 "assets": assets, "shortfall": shortfall, "both_alive": both_alive,
@@ -349,6 +377,9 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
         "house_bequest": house_bequest,
         "assets_yearly": assets_yearly,
         "start_age_h": start_age_h,
+        "health_total": health_total,
+        "dep_lost_age": dep_lost_age,
+        "dep_lost_premium": dep_lost_premium,
     }
     frame = pd.DataFrame(rows) if record else pd.DataFrame()
     return Scenario(strategy=strat, frame=frame, metrics=metrics)

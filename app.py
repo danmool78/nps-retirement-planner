@@ -119,7 +119,7 @@ GRAPH_GUIDES = {
     "breakdown": """
 **월수입 구성표 읽는 법** — 추천 전략에서 나이별로 매달 실제 손에 쥐는 돈의 구성.
 - **공적연금(세전)** = 국민·교직원·공무원+유족연금 합(세금 떼기 전).
-- **− 세금·건보** = 연금소득세+건강보험료로 빠지는 금액.
+- **− 세금·건보** = 연금소득세 + 건강보험료(피부양자면 0, 탈락하면 지역가입자 보험료)로 빠지는 금액.
 - **실수령 연금** = 세전에서 세금·건보를 뺀 실제 받는 연금.
 - **+ 기초연금** = 65세부터 추가(부부 동시 수급 시 각 감액).
 - **+ 주택연금** = 주택연금 월지급액(비과세).
@@ -253,7 +253,7 @@ PERSIST = {
     "ah": ("ah", "bool", True, None, None),
     "hm": ("hm", "int", 120, 0, 1_000),
     "tx": ("tx", "float", 4.0, 0.0, 30.0),
-    "hi": ("hi", "float", 4.0, 0.0, 20.0),
+    "dep": ("dep", "bool", True, None, None),
     "dr": ("dr", "float", 2.0, 0.0, 10.0),
 }
 _SPEC_BY_KEY = {spec[0]: spec for spec in PERSIST.values()}
@@ -487,11 +487,12 @@ def build_inputs(P: dict):
         t_surv = st.number_input("교직원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0, key="ts") / 100
         g_early = st.number_input("공무원 조기퇴직 연감액률(%)", 0.0, 10.0, 5.0, 0.5, key="ge") / 100
         g_surv = st.number_input("공무원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0, key="gs") / 100
-    with sb.expander("세금·건보·기초연금"):
+    with sb.expander("세금·건강보험·기초연금"):
         tax_rate = st.number_input("연금소득 실효세율(%)", 0.0, 30.0, step=0.5, key="tx",
                                    help="국민·직역·유족연금에 적용(주택연금·기초연금 제외)", **dv("tx")) / 100
-        health_rate = st.number_input("건강보험료율(연금 대비, %)", 0.0, 20.0, step=0.5, key="hi",
-                                      help="은퇴 후 지역가입 근사", **dv("hi")) / 100
+        dep_possible = st.toggle("건보 피부양자로 올릴 직장가입 가족 있음", key="dep",
+                                 help="자녀 등 직장가입자 가족이 있으면 소득·재산 요건을 따져 피부양자 여부를 판정합니다. "
+                                      "없으면 처음부터 지역가입자 보험료를 냅니다.", **dv("dep"))
         basic_amt = st.number_input("기초연금 단독 월액(원)", 0, 1_000_000,
                                     int(P.get("basic_single_amount", 340_000)), 1_000) 
         basic_couple_red = st.number_input("부부 동시수급 감액률(%)", 0.0, 50.0,
@@ -526,6 +527,7 @@ def build_inputs(P: dict):
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
         use_housing_pension=use_house, retirement_age=retire_age, household=household,
+        health_dependent_possible=dep_possible,
     )
 
     cfg = Config(
@@ -536,7 +538,10 @@ def build_inputs(P: dict):
         gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv,
                       survivor_dup_rate=dup),
         housing=_hpol,
-        tax=TaxPolicy(pension_tax_rate=tax_rate, health_insurance_rate=health_rate),
+        tax=TaxPolicy(pension_tax_rate=tax_rate,
+                      **{k: P[k] for k in ("health_rate", "ltc_ratio", "dependent_income_limit",
+                                           "dependent_property_limit", "local_pension_ratio",
+                                           "property_premium_per_100m") if k in P}),
         basic=BasicPensionPolicy(
             single_amount=basic_amt, couple_reduction=basic_couple_red,
             selection_criteria_couple=basic_crit, selection_criteria_single=basic_crit_single,
@@ -675,6 +680,11 @@ def conclusion_html(user, cfg, R) -> str:
                      f"<b>{fmt_eok(b['shortfall_total'])}</b>이 부족합니다. 생활비를 줄이거나 은퇴를 늦추는 등의 조정이 필요합니다.")
 
     cautions = []
+    bm = R["best_scenario"].metrics
+    if bm.get("dep_lost_age") is not None and user.health_dependent_possible:
+        who_h = "" if single else "남편 "
+        cautions.append(f"연금 등 소득이 늘어 {who_h}{bm['dep_lost_age']:.0f}세부터 건강보험 피부양자에서 빠져 "
+                        f"월 약 <b>{bm['dep_lost_premium']/1e4:,.0f}만원</b>의 건보료가 생깁니다(계산에 반영됨)")
     sr = R["montecarlo"]["success_rate"] * 100
     if sr < 80 and float(b["shortfall_months"]) == 0:   # 이미 부족이면 위 문장으로 충분
         cautions.append(f"투자 수익이 해마다 흔들리면 끝까지 버틸 확률이 <b>{sr:.0f}%</b>로 낮아집니다")
@@ -984,6 +994,26 @@ def main():
             if bd:
                 st.markdown(breakdown_html(bd), unsafe_allow_html=True)
             guide("breakdown")
+
+            ui.section("shield", "건강보험", "피부양자 자격(소득 연 2,000만원·재산 요건)과 지역가입자 보험료")
+            bm = best_scenario.metrics
+            lost = bm.get("dep_lost_age")
+            who_h = "" if single else "남편 "
+            if not user.health_dependent_possible:
+                status, sub, tone = "지역가입자", "피부양자로 올릴 직장가입 가족 없음", "warn"
+            elif lost is None:
+                status, sub, tone = "피부양자 유지", "기대수명까지 건보료 없음", "good"
+            else:
+                status, sub, tone = f"{who_h}{lost:.0f}세부터 지역가입자", "소득 또는 재산 요건 초과", "warn"
+            ui.kpi_grid([
+                ui.kpi("shield", "건강보험 자격", status, sub, tone=tone),
+                ui.kpi("coins", "자격 상실 시 월 건보료",
+                       "-" if lost is None else f"{bm['dep_lost_premium']/1e4:,.1f}만원", "장기요양보험료 포함"),
+                ui.kpi("chart", "평생 건보료 합계", fmt_eok(bm.get("health_total", 0.0)), "기대수명까지(명목)"),
+            ])
+            st.caption("피부양자 요건: 1인당 연소득 2,000만원 이하(공적연금 전액·기타소득 포함, 개인·퇴직연금 제외), "
+                       "재산세 과세표준 5.4억 이하(9억 이하는 연소득 1,000만원 이하일 때). 부부 중 한 명이라도 넘으면 둘 다 탈락. "
+                       "지역 보험료의 재산분·연금 반영률은 근사이므로 정확한 금액은 건강보험공단 모의계산으로 확인하세요.")
 
             ui.section("thermo", "물가 안전 마진", "물가가 얼마까지 올라도 부족이 없는지")
             worst = best_row.get("worst_infl_shortfall", float("nan"))

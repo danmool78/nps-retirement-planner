@@ -266,6 +266,86 @@
           ]
         }
       ]
+    },
+    "health_rate": {
+      "label": "건강보험료율",
+      "unit": "%",
+      "revises": "annual-01",
+      "source": "국민건강보험공단(2026 7.19% 결정)",
+      "history": [
+        {
+          "from": "2025-01-01",
+          "value": 0.0709
+        },
+        {
+          "from": "2026-01-01",
+          "value": 0.0719
+        }
+      ]
+    },
+    "ltc_ratio": {
+      "label": "장기요양보험료(건보료 대비)",
+      "unit": "%",
+      "revises": "annual-01",
+      "source": "국민건강보험공단(2026 장기요양보험료율 0.9448% = 건보료의 13.14%)",
+      "history": [
+        {
+          "from": "2025-01-01",
+          "value": 0.1295
+        },
+        {
+          "from": "2026-01-01",
+          "value": 0.1314
+        }
+      ]
+    },
+    "dependent_income_limit": {
+      "label": "건보 피부양자 소득요건(연, 1인)",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "국민건강보험법 시행규칙(2022.9 개편)",
+      "history": [
+        {
+          "from": "2022-09-01",
+          "value": 20000000
+        }
+      ]
+    },
+    "dependent_property_limit": {
+      "label": "건보 피부양자 재산요건(과세표준)",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "5.4억 이하 충족, 5.4~9억은 연소득 1,000만 이하일 때만",
+      "history": [
+        {
+          "from": "2022-09-01",
+          "value": 540000000
+        }
+      ]
+    },
+    "local_pension_ratio": {
+      "label": "지역 건보료 공적연금 반영률",
+      "unit": "%",
+      "revises": "irregular",
+      "source": "2022.9 부과체계 개편(근사, 공단 확인 권장)",
+      "history": [
+        {
+          "from": "2022-09-01",
+          "value": 0.5
+        }
+      ]
+    },
+    "property_premium_per_100m": {
+      "label": "지역 재산보험료(공제 후 과세표준 1억당 월, 근사)",
+      "unit": "원",
+      "revises": "irregular",
+      "source": "재산점수표 × 점수당 금액(2026 약 211.5원)의 선형 근사",
+      "history": [
+        {
+          "from": "2026-01-01",
+          "value": 45000
+        }
+      ]
     }
   }
 }
