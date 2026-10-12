@@ -255,6 +255,9 @@ PERSIST = {
     "hm": ("hm", "int", 120, 0, 1_000),
     "tx": ("tx", "float", 4.0, 0.0, 30.0),
     "dep": ("dep", "bool", True, None, None),
+    "e75": ("e75", "int", 100, 50, 130),
+    "e85": ("e85", "int", 100, 40, 130),
+    "med": ("med", "int", 0, 0, 1_000),
     "ppb": ("ppb", "float", 0.0, 0.0, 100.0),
     "pps": ("pps", "int", 60, 55, 90),
     "ppy": ("ppy", "int", 20, 5, 40),
@@ -412,6 +415,18 @@ def build_inputs(P: dict):
                                  help="수익률의 연 표준편차. 클수록 폭락 위험이 큼(몬테카를로에 사용)",
                                  **dv("vol")) / 100
 
+    with sb.expander("나이별 생활비 변화"):
+        def typical_pattern():
+            st.session_state.update({"e75": 90, "e85": 80, "med": 50})
+        st.button("일반적인 패턴 적용", key="exp_typical", on_click=typical_pattern, width="stretch",
+                  help="75세부터 90%, 85세부터 80%, 85세부터 의료·간병비 월 50만원")
+        e1, e2 = st.columns(2)
+        e75 = e1.number_input("75세부터(%)", 50, 130, step=5, key="e75", **dv("e75"),
+                              help="은퇴 초기 생활비 대비. 활동이 줄면 보통 낮아집니다.")
+        e85 = e2.number_input("85세부터(%)", 40, 130, step=5, key="e85", **dv("e85"))
+        med = st.number_input("85세부터 의료·간병비(만원/월)", 0, 1_000, step=10, key="med", **dv("med"),
+                              help="현재가치. 물가와 함께 오릅니다.") * 10_000
+
     with sb.expander("기타 소득·재산"):
         other_income = st.number_input("기타 월소득(만원)", 0, 2_000, step=10, key="oi",
                                        help="연금 외 근로·임대·이자·개인/퇴직연금 등. 현금흐름과 기초연금 판정에 반영",
@@ -545,6 +560,7 @@ def build_inputs(P: dict):
         house_value=house_val, housing_monthly_base=house_monthly,
         use_housing_pension=use_house, retirement_age=retire_age, household=household,
         health_dependent_possible=dep_possible,
+        expense_ratio_75=e75 / 100, expense_ratio_85=e85 / 100, late_care_monthly=med,
         private_pension_balance=pp_bal, private_pension_start_age=pp_start, private_pension_years=pp_years,
     )
 

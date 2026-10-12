@@ -338,8 +338,17 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
 
         # --- 4) 생활비(물가상승 반영) ---
         both_alive = h_alive and w_alive
-        base_expense = user.living_expense_monthly * ((1.0 + strat.inflation_rate) ** year_idx)
+        infl_factor = (1.0 + strat.inflation_rate) ** year_idx
+        base_expense = user.living_expense_monthly * infl_factor
+        # 나이별 생활비 변화(생존자 나이 기준) + 85세 이후 의료·간병비.
+        age_now = h_age if h_alive else w_age
+        if age_now >= 85:
+            base_expense *= user.expense_ratio_85
+        elif age_now >= 75:
+            base_expense *= user.expense_ratio_75
         expense = base_expense if both_alive else base_expense * user.single_expense_ratio
+        if age_now >= 85 and user.late_care_monthly > 0 and (h_alive or w_alive):
+            expense += user.late_care_monthly * infl_factor
 
         # --- 5) 순현금흐름과 자산 갱신 ---
         net = income - expense

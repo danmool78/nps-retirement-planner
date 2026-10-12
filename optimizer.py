@@ -229,6 +229,8 @@ def what_if(user: UserInput, cfg: Config, strat: Strategy) -> pd.DataFrame:
     ]
     if user.house_value > 0 and strat.use_housing:
         cases.append(("집값이 20% 내리면", "주택", with_house(0.8), strat))
+    cases.append(("85세부터 간병비 월 100만원 생기면", "의료",
+                  replace(user, late_care_monthly=user.late_care_monthly + 1_000_000), strat))
     if user.other_income_monthly <= 0:
         cases.append(("은퇴 후 월 50만원 일하기(65세까지)", "소득",
                       replace(user, other_income_monthly=500_000, other_income_end_age=65), strat))
