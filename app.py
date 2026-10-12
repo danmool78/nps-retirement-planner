@@ -547,227 +547,252 @@ def main():
 
     # 실행 버튼을 누른 시점의 입력을 스냅샷으로 고정 → 이후 입력을 바꿔도 결과는 그대로 유지되고,
     # 입력을 바꿀 때마다 무거운 계산이 다시 돌지 않는다(브라우저 계산이라 특히 중요).
-    def run():
-        st.session_state["snap"] = (user, cfg, basic_mode)
+    def run(new_user, new_cfg, new_mode):
+        # 입력값은 버튼을 그린 시점의 값을 인자로 고정해 받는다. (클로저로 user/cfg 를 참조하면
+        # 아래에서 user, cfg 가 이전 스냅샷으로 다시 대입되므로 새 입력이 무시되는 버그가 생긴다.)
+        # 입력이 바뀐 실행이면 먼저 로딩 화면만 보여주고 다음 실행에서 계산한다(아래 body 참고).
+        prev = st.session_state.get("snap")
+        if prev is None or repr(prev[:2]) != repr((new_user, new_cfg)):
+            st.session_state["_pending"] = True
+        st.session_state["snap"] = (new_user, new_cfg, new_mode)
         st.session_state.pop("exports", None)
         st.session_state["_sidebar"] = "close"   # 모바일: 실행하면 입력창을 닫고 결과를 보여줌
+
+    run_args = (user, cfg, basic_mode)
 
     def open_inputs():
         st.session_state["_sidebar"] = "open"
 
-    run_slot.button("시뮬레이션 실행", type="primary", width="stretch", on_click=run, key="run_side")
+    run_slot.button("시뮬레이션 실행", type="primary", width="stretch", on_click=run, args=run_args, key="run_side")
+
+    # 본문 전체를 한 자리(body)에 그린다. 실행 직후에는 이 자리를 로딩 화면으로 통째로 바꿔
+    # 이전 화면(시작 안내·이전 결과)이 로딩 아래에 남지 않게 하고, 화면을 전송한 뒤 곧바로 다시 실행해 계산한다.
+    # (브라우저/stlite 에서는 계산 중 Python 이 멈춰 화면 갱신이 안 되므로 두 단계로 나눠야 로딩이 보인다.)
+    body = st.empty()
+    if st.session_state.pop("_pending", False):
+        # 1단계: 로딩 화면만 그리고 바로 다시 실행. 2단계에서 실제 계산(computing=True).
+        ui.loading(target=body)
+        if st.session_state.get("_sidebar"):   # 모바일: 로딩이 보이도록 입력창을 바로 닫기 시도(2단계에서 한 번 더)
+            ui.sidebar_action(st.session_state["_sidebar"])
+        st.session_state["_computing"] = True
+        st.rerun()
+    computing = st.session_state.pop("_computing", False)
+    # 입력창 열기/닫기 스크립트는 1단계(곧바로 중단되는 실행)가 아닌 이번 실행에서 처리해야 확실히 동작한다.
     if st.session_state.get("_sidebar"):
         ui.sidebar_action(st.session_state.pop("_sidebar"))
 
-    snap = st.session_state.get("snap")
-    if snap is None:
-        # 모바일에서는 입력창이 접혀 있으므로 본문에서 바로 열 수 있게(넓은 화면에서는 CSS 로 숨김).
-        st.button("입력값 입력하기", on_click=open_inputs, key="open_inputs")
-        render_landing(user, cfg)
-        st.button("시뮬레이션 실행", type="primary", on_click=run, key="run_main")
-        return
-    st.button("입력값 수정하기", on_click=open_inputs, key="open_inputs2")
-    if repr(snap[:2]) != repr((user, cfg)):
-        ui.note("warn", "입력값이 바뀌었습니다. 아래 결과는 이전 입력 기준입니다.")
-        st.button("새 입력으로 다시 계산", type="primary", on_click=run, key="run_again")
-    user, cfg, basic_mode = snap
+    with body.container():
+        snap = st.session_state.get("snap")
+        if snap is None:
+            # 모바일에서는 입력창이 접혀 있으므로 본문에서 바로 열 수 있게(넓은 화면에서는 CSS 로 숨김).
+            st.button("입력값 입력하기", on_click=open_inputs, key="open_inputs")
+            render_landing(user, cfg)
+            st.button("시뮬레이션 실행", type="primary", on_click=run, args=run_args, key="run_main")
+            return
+        # 로딩 화면은 본문 첫 자리에 둬서 1단계에서 띄운 로딩과 같은 자리를 이어받게 한다(겹침 방지).
+        # 실제 계산이 도는 실행에서만 표시(캐시된 결과로 다시 그릴 때 깜빡이지 않게).
+        status = st.empty()
+        if computing:
+            ui.loading(target=status)
+        st.button("입력값 수정하기", on_click=open_inputs, key="open_inputs2")
+        if repr(snap[:2]) != repr((user, cfg)):
+            ui.note("warn", "입력값이 바뀌었습니다. 아래 결과는 이전 입력 기준입니다.")
+            st.button("새 입력으로 다시 계산", type="primary", on_click=run, args=run_args, key="run_again")
+        user, cfg, basic_mode = snap
 
-    # 1) 계산(같은 입력이면 캐시 재사용) ---------------------------------------
-    status = st.empty()
-    ui.note("info", "조합을 계산 중입니다(물가 스트레스·몬테카를로 포함). 기기 성능에 따라 수 초~수십 초 걸립니다.",
-            target=status)
-    R = compute_pipeline(user, cfg)
-    status.empty()
+        # 1) 계산(같은 입력이면 캐시 재사용) ---------------------------------------
+        R = compute_pipeline(user, cfg)
+        status.empty()
 
-    if R["best_scenario"].frame.empty:
-        ui.note("bad", "시뮬레이션 기간이 없습니다. 기대수명이 은퇴나이(아내는 그 시점 나이)보다 커야 합니다.")
-        return
+        if R["best_scenario"].frame.empty:
+            ui.note("bad", "시뮬레이션 기간이 없습니다. 기대수명이 은퇴나이(아내는 그 시점 나이)보다 커야 합니다.")
+            return
 
-    df, pareto, tops = R["df"], R["pareto"], R["tops"]
-    best_row = tops["stable"].iloc[0]
-    best_scenario = R["best_scenario"]
-    MC = R["montecarlo"]
-    m_val, m_sub, m_report = margin_text(R["margin"], cfg, user)
-    infl_list = ", ".join(f"{x*100:.0f}%" for x in cfg.optimizer.robust_inflations)
+        df, pareto, tops = R["df"], R["pareto"], R["tops"]
+        best_row = tops["stable"].iloc[0]
+        best_scenario = R["best_scenario"]
+        MC = R["montecarlo"]
+        m_val, m_sub, m_report = margin_text(R["margin"], cfg, user)
+        infl_list = ", ".join(f"{x*100:.0f}%" for x in cfg.optimizer.robust_inflations)
 
-    # 2) 핵심 요약 --------------------------------------------------------------
-    ui.section("target", "핵심 요약",
-               f"{R['n']:,}개 조합 평가 · 물가 {infl_list} 스트레스 반영 · 안정형 1위 기준")
-    sr = MC["success_rate"] * 100
-    sf_months = float(best_row["shortfall_months"])
-    ui.kpi_grid([
-        ui.kpi("calendar", "추천 연금 개시",
-               f"{int(best_row['h_claim'])}세 / {int(best_row['w_claim'])}세", "남편 / 아내", highlight=True),
-        ui.kpi("home", "주택연금 개시", housing_text(best_row),
-               "부부 중 남편 나이 기준" if best_row["use_housing"] else "주택연금 미사용"),
-        ui.kpi("coins", "평생 총수령(현재가치)", fmt_eok(best_row["total_pv"]), "할인율 반영"),
-        ui.kpi("check" if sf_months == 0 else "alert", "생활비 부족",
-               "없음" if sf_months == 0 else f"{sf_months:.0f}개월",
-               "기대수명까지" if sf_months == 0 else f"총 {fmt_eok(best_row['shortfall_total'])}",
-               tone="good" if sf_months == 0 else "bad"),
-        ui.kpi("gift", "예상 상속(잔여자산)", fmt_eok(best_row["bequest"]), "사망 시점 기준"),
-        ui.kpi("thermo", "물가 안전 마진", m_val, m_sub,
-               tone="bad" if R["margin"] is None else "good"),
-        ui.kpi("pulse", "투자 변동성 성공확률", f"{sr:.0f}%",
-               f"변동성 {MC['volatility']*100:.0f}% · {MC['n_sims']}회",
-               tone="good" if sr >= 80 else ("warn" if sr >= 60 else "bad")),
-    ])
-    render_basic_note(user, cfg, basic_mode)
-
-    # 3) 탭 ---------------------------------------------------------------------
-    # 탭 이름은 모바일 한 화면에 최대한 들어가도록 짧게.
-    tabs = st.tabs(["추천", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
-    report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
-
-    with tabs[0]:
-        ui.section("trophy", "성향별 추천 전략", "관점마다 상위 5개 조합과 자동 장단점")
-        guide("views")
-        v1, v2, v3 = st.tabs(["안정형", "총수령액 극대화형", "상속중시형"])
-        with v1:
-            ui.section("shield", "안정형", "생활비 부족 최소화 + 물가에 견고")
-            render_view(tops["stable"], "stable", df)
-        with v2:
-            ui.section("trend", "총수령액 극대화형", "평생 받는 총액(현재가치) 최대화")
-            render_view(tops["maximize"], "maximize", df)
-        with v3:
-            ui.section("gift", "상속중시형", "사망 시 남기는 잔여자산 최대화")
-            render_view(tops["bequest"], "bequest", df)
-
-    with tabs[1]:
-        ui.section("coins", "추천 전략 월수입 구성", "세전 연금 → 세금·건보 차감 → 기초·주택연금 가산 (명목 금액)")
-        bd = income_breakdown(best_scenario.frame)
-        if bd:
-            st.markdown(breakdown_html(bd), unsafe_allow_html=True)
-        guide("breakdown")
-
-        ui.section("thermo", "물가 안전 마진", "물가가 얼마까지 올라도 부족이 없는지")
-        worst = best_row.get("worst_infl_shortfall", float("nan"))
-        cards = [ui.kpi("thermo", "안전 마진", m_val, m_sub, tone="bad" if R["margin"] is None else "good"),
-                 ui.kpi("info", "현재 가정 물가", f"{user.inflation_rate*100:.1f}%")]
-        if worst == worst:  # NaN 체크
-            cards.append(ui.kpi("alert", "최악 물가 부족액", "없음" if worst <= 0 else fmt_eok(worst),
-                                f"물가 {infl_list} 중 최악", tone="good" if worst <= 0 else "bad"))
-        ui.kpi_grid(cards)
-        guide("margin")
-
-        ui.section("pulse", "투자 변동성 스트레스", "수익률을 매년 무작위로 흔든 몬테카를로 시뮬레이션")
+        # 2) 핵심 요약 --------------------------------------------------------------
+        ui.section("target", "핵심 요약",
+                   f"{R['n']:,}개 조합 평가 · 물가 {infl_list} 스트레스 반영 · 안정형 1위 기준")
+        sr = MC["success_rate"] * 100
+        sf_months = float(best_row["shortfall_months"])
         ui.kpi_grid([
-            ui.kpi("check", "성공확률", f"{sr:.0f}%", "부족 없이 끝까지 버팀",
-                   tone="good" if sr >= 80 else "warn"),
-            ui.kpi("alert", "자산 고갈 확률", f"{MC['depletion_rate']*100:.0f}%", tone="bad"),
-            ui.kpi("gift", "상속 자산 중앙값", fmt_eok(MC["bequest_p50"]),
-                   f"하위10% {fmt_eok(MC['bequest_p10'])} ~ 상위10% {fmt_eok(MC['bequest_p90'])}"),
+            ui.kpi("calendar", "추천 연금 개시",
+                   f"{int(best_row['h_claim'])}세 / {int(best_row['w_claim'])}세", "남편 / 아내", highlight=True),
+            ui.kpi("home", "주택연금 개시", housing_text(best_row),
+                   "부부 중 남편 나이 기준" if best_row["use_housing"] else "주택연금 미사용"),
+            ui.kpi("coins", "평생 총수령(현재가치)", fmt_eok(best_row["total_pv"]), "할인율 반영"),
+            ui.kpi("check" if sf_months == 0 else "alert", "생활비 부족",
+                   "없음" if sf_months == 0 else f"{sf_months:.0f}개월",
+                   "기대수명까지" if sf_months == 0 else f"총 {fmt_eok(best_row['shortfall_total'])}",
+                   tone="good" if sf_months == 0 else "bad"),
+            ui.kpi("gift", "예상 상속(잔여자산)", fmt_eok(best_row["bequest"]), "사망 시점 기준"),
+            ui.kpi("thermo", "물가 안전 마진", m_val, m_sub,
+                   tone="bad" if R["margin"] is None else "good"),
+            ui.kpi("pulse", "투자 변동성 성공확률", f"{sr:.0f}%",
+                   f"변동성 {MC['volatility']*100:.0f}% · {MC['n_sims']}회",
+                   tone="good" if sr >= 80 else ("warn" if sr >= 60 else "bad")),
         ])
-        fig_mc = viz.fig_montecarlo_fan(MC)
-        chart(fig_mc, "montecarlo")
+        render_basic_note(user, cfg, basic_mode)
 
-    with tabs[2]:
-        ui.section("chart", "현금흐름과 자산", "추천 전략(안정형 1위)의 나이별 흐름")
-        # 사망 시점(남편 나이축)을 계산해 현금흐름 그래프에 표시.
-        wife_start = user.retirement_age - (user.wife.birth_year - user.husband.birth_year)
-        h_death_age = float(best_row["h_life"])
-        w_death_age = user.retirement_age + (float(best_row["w_life"]) - wife_start)
-        deaths = sorted([("남편 사망", h_death_age), ("아내 사망", w_death_age)], key=lambda t: t[1])
-        fig_cf = viz.fig_monthly_cashflow(best_scenario, deaths=deaths)
-        fig_as = viz.fig_cumulative_assets(best_scenario)
-        g1, g2 = st.columns(2)
-        chart(fig_cf, "cashflow", g1)
-        chart(fig_as, "assets", g2)
+        # 3) 탭 ---------------------------------------------------------------------
+        # 탭 이름은 모바일 한 화면에 최대한 들어가도록 짧게.
+        tabs = st.tabs(["추천", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
+        report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
 
-    with tabs[3]:
-        ui.section("calendar", "나이별 누적 수령액과 원금확보 시점", "언제부터 받으면 몇 세에 낸 보험료를 회수하는지")
-        h_lbl = f"남편·{pension.type_label(user.husband)}"
-        w_lbl = f"아내·{pension.type_label(user.wife)}"
-        fig_h = viz.fig_cumulative_receipts(*R["husband_curves"], h_lbl)
-        fig_w = viz.fig_cumulative_receipts(*R["wife_curves"], w_lbl)
-        g3, g4 = st.columns(2)
-        chart(fig_h, "receipts", g3)
-        chart(fig_w, "receipts", g4)
+        with tabs[0]:
+            ui.section("trophy", "성향별 추천 전략", "관점마다 상위 5개 조합과 자동 장단점")
+            guide("views")
+            v1, v2, v3 = st.tabs(["안정형", "총수령액 극대화형", "상속중시형"])
+            with v1:
+                ui.section("shield", "안정형", "생활비 부족 최소화 + 물가에 견고")
+                render_view(tops["stable"], "stable", df)
+            with v2:
+                ui.section("trend", "총수령액 극대화형", "평생 받는 총액(현재가치) 최대화")
+                render_view(tops["maximize"], "maximize", df)
+            with v3:
+                ui.section("gift", "상속중시형", "사망 시 남기는 잔여자산 최대화")
+                render_view(tops["bequest"], "bequest", df)
 
-    with tabs[4]:
-        ui.section("scale", "전략 비교·민감도", "주택연금 개시나이, 물가, 기대수명에 따라 결과가 어떻게 달라지는지")
-        fig_hz = viz.fig_heatmap(df, "shortfall_total")
-        g5, g6 = st.columns(2)
-        fig_ho = None
-        if R["housing_df"] is not None:
-            fig_ho = viz.fig_shortfall_by_housing(R["housing_df"])
-            chart(fig_ho, "housing", g5)
-        else:
-            ui.note("info", "주택연금 미사용 — 주택연금 개시시점 그래프는 생략합니다.", target=g5)
-        chart(fig_hz, "heatmap", g6)
+        with tabs[1]:
+            ui.section("coins", "추천 전략 월수입 구성", "세전 연금 → 세금·건보 차감 → 기초·주택연금 가산 (명목 금액)")
+            bd = income_breakdown(best_scenario.frame)
+            if bd:
+                st.markdown(breakdown_html(bd), unsafe_allow_html=True)
+            guide("breakdown")
 
-        fig_in = viz.fig_shortfall_by_inflation(R["inflation_df"])
-        fig_li = viz.fig_best_by_life(R["life_df"])
-        g7, g8 = st.columns(2)
-        chart(fig_in, "inflation", g7)
-        chart(fig_li, "life", g8)
+            ui.section("thermo", "물가 안전 마진", "물가가 얼마까지 올라도 부족이 없는지")
+            worst = best_row.get("worst_infl_shortfall", float("nan"))
+            cards = [ui.kpi("thermo", "안전 마진", m_val, m_sub, tone="bad" if R["margin"] is None else "good"),
+                     ui.kpi("info", "현재 가정 물가", f"{user.inflation_rate*100:.1f}%")]
+            if worst == worst:  # NaN 체크
+                cards.append(ui.kpi("alert", "최악 물가 부족액", "없음" if worst <= 0 else fmt_eok(worst),
+                                    f"물가 {infl_list} 중 최악", tone="good" if worst <= 0 else "bad"))
+            ui.kpi_grid(cards)
+            guide("margin")
 
-        fig_pa = viz.fig_pareto(df, pareto, best_id=R["best_id"])
-        g9, g10 = st.columns(2)
-        chart(fig_pa, "pareto", g9)
-        with g10:
-            SCATTER_VIEWS = {"안정형": "stable", "총수령액 극대화형": "maximize", "상속중시형": "bequest"}
-            sview = SCATTER_VIEWS[st.segmented_control("색 기준(관점)", list(SCATTER_VIEWS),
-                                                       default="안정형", key="scatterview") or "안정형"]
-            fig_sc = viz.fig_score_scatter(df, sview, best_id=int(tops[sview].iloc[0]["id"]))
-            chart(fig_sc, "scatter")
+            ui.section("pulse", "투자 변동성 스트레스", "수익률을 매년 무작위로 흔든 몬테카를로 시뮬레이션")
+            ui.kpi_grid([
+                ui.kpi("check", "성공확률", f"{sr:.0f}%", "부족 없이 끝까지 버팀",
+                       tone="good" if sr >= 80 else "warn"),
+                ui.kpi("alert", "자산 고갈 확률", f"{MC['depletion_rate']*100:.0f}%", tone="bad"),
+                ui.kpi("gift", "상속 자산 중앙값", fmt_eok(MC["bequest_p50"]),
+                       f"하위10% {fmt_eok(MC['bequest_p10'])} ~ 상위10% {fmt_eok(MC['bequest_p90'])}"),
+            ])
+            fig_mc = viz.fig_montecarlo_fan(MC)
+            chart(fig_mc, "montecarlo")
 
-    report_figs += [("① 연령별 월 현금흐름", fig_cf), ("② 연령별 누적자산", fig_as),
-                    (f"③ 누적 수령액·원금확보 ({h_lbl})", fig_h),
-                    (f"③ 누적 수령액·원금확보 ({w_lbl})", fig_w)]
-    if fig_ho is not None:
-        report_figs.append(("④ 주택연금 개시별 부족액", fig_ho))
-    report_figs += [("⑤ 국민×주택 히트맵", fig_hz), ("⑥ 물가상승률별 부족액", fig_in),
-                    ("⑦ 기대수명별 전략", fig_li), ("⑧ Pareto Frontier", fig_pa),
-                    ("⑨ 조합별 점수 산점도", fig_sc), ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
+        with tabs[2]:
+            ui.section("chart", "현금흐름과 자산", "추천 전략(안정형 1위)의 나이별 흐름")
+            # 사망 시점(남편 나이축)을 계산해 현금흐름 그래프에 표시.
+            wife_start = user.retirement_age - (user.wife.birth_year - user.husband.birth_year)
+            h_death_age = float(best_row["h_life"])
+            w_death_age = user.retirement_age + (float(best_row["w_life"]) - wife_start)
+            deaths = sorted([("남편 사망", h_death_age), ("아내 사망", w_death_age)], key=lambda t: t[1])
+            fig_cf = viz.fig_monthly_cashflow(best_scenario, deaths=deaths)
+            fig_as = viz.fig_cumulative_assets(best_scenario)
+            g1, g2 = st.columns(2)
+            chart(fig_cf, "cashflow", g1)
+            chart(fig_as, "assets", g2)
 
-    with tabs[5]:
-        ui.section("download", "내보내기", "리포트·표를 파일로 저장 (파일도 브라우저 안에서 생성됩니다)")
-        summary = {
-            "n_combos": R["n"],
-            "normal_ages": (f"정상개시 남편({pension.type_label(user.husband)}) "
-                            f"{pension.normal_start_age(user.husband, cfg)}세 / "
-                            f"아내({pension.type_label(user.wife)}) "
-                            f"{pension.normal_start_age(user.wife, cfg)}세"),
-            "margin": m_report,
-            "inputs": [
-                ("남편", f"{pension.type_label(user.husband)} · {user.husband.birth_year}년생 · "
-                         f"월 {user.husband.nps_monthly:,.0f}원 · 납입원금 {user.husband.paid_principal:,.0f}원 · "
-                         f"기대수명 {user.husband_life_expectancy}세"),
-                ("아내", f"{pension.type_label(user.wife)} · {user.wife.birth_year}년생 · "
-                         f"월 {user.wife.nps_monthly:,.0f}원 · 납입원금 {user.wife.paid_principal:,.0f}원 · "
-                         f"기대수명 {user.wife_life_expectancy}세"),
-                ("은퇴나이 / 월 생활비", f"{user.retirement_age}세 / {user.living_expense_monthly:,.0f}원"),
-                ("금융자산 / 투자수익률", f"{user.financial_assets:,.0f}원 / {user.investment_return*100:.1f}%"),
-                ("물가상승률", f"{user.inflation_rate*100:.1f}%"),
-                ("주택", (f"{user.house_value:,.0f}원 · 주택연금 월 {user.housing_monthly_base:,.0f}원"
-                          if user.use_housing_pension else "주택연금 미사용")),
-                ("세금·건보 / 기초연금",
-                 f"연금소득 실효 {(cfg.tax.pension_tax_rate+cfg.tax.health_insurance_rate)*100:.0f}% 차감 · "
-                 f"기초연금 {'수급' if user.basic_pension_eligible else '비대상'}"),
-            ],
-        }
-        # 파일 생성(특히 plotly.js 를 통째로 넣는 HTML 리포트)은 무거우므로 한 번 만든 결과를 재사용.
-        key = (repr(snap[:2]), sview)
-        ex = st.session_state.get("exports")
-        if not ex or ex["key"] != key:
-            ex = {"key": key,
-                  "report": export.build_html_report(report_figs, tops, summary),
-                  "csv": export.to_csv_bytes(df),
-                  "xlsx": export.to_excel_bytes(df, best_scenario)}
-            st.session_state["exports"] = ex
-        e1, e2, e3 = st.columns(3)
-        e1.download_button("전체 리포트 (HTML · PDF 저장용)", ex["report"], "노후자금리포트.html", "text/html",
-                           type="primary", width="stretch")
-        e2.download_button("CSV (전체 조합)", ex["csv"], "nps_result.csv", "text/csv",
-                           width="stretch")
-        e3.download_button("Excel (요약 + 월별)", ex["xlsx"], "nps_result.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           width="stretch")
-        st.caption("리포트 파일을 열고 Ctrl+P → '대상: PDF로 저장' 하면 한글·그래프 그대로 PDF가 됩니다.")
+        with tabs[3]:
+            ui.section("calendar", "나이별 누적 수령액과 원금확보 시점", "언제부터 받으면 몇 세에 낸 보험료를 회수하는지")
+            h_lbl = f"남편·{pension.type_label(user.husband)}"
+            w_lbl = f"아내·{pension.type_label(user.wife)}"
+            fig_h = viz.fig_cumulative_receipts(*R["husband_curves"], h_lbl)
+            fig_w = viz.fig_cumulative_receipts(*R["wife_curves"], w_lbl)
+            g3, g4 = st.columns(2)
+            chart(fig_h, "receipts", g3)
+            chart(fig_w, "receipts", g4)
 
-    st.caption("본 도구의 연금·주택연금 금액은 근사 계산이며 실제 수급액과 다를 수 있습니다. "
-               "정확한 금액은 국민연금공단·한국주택금융공사·복지로의 공식 계산기로 확인하세요.")
+        with tabs[4]:
+            ui.section("scale", "전략 비교·민감도", "주택연금 개시나이, 물가, 기대수명에 따라 결과가 어떻게 달라지는지")
+            fig_hz = viz.fig_heatmap(df, "shortfall_total")
+            g5, g6 = st.columns(2)
+            fig_ho = None
+            if R["housing_df"] is not None:
+                fig_ho = viz.fig_shortfall_by_housing(R["housing_df"])
+                chart(fig_ho, "housing", g5)
+            else:
+                ui.note("info", "주택연금 미사용 — 주택연금 개시시점 그래프는 생략합니다.", target=g5)
+            chart(fig_hz, "heatmap", g6)
+
+            fig_in = viz.fig_shortfall_by_inflation(R["inflation_df"])
+            fig_li = viz.fig_best_by_life(R["life_df"])
+            g7, g8 = st.columns(2)
+            chart(fig_in, "inflation", g7)
+            chart(fig_li, "life", g8)
+
+            fig_pa = viz.fig_pareto(df, pareto, best_id=R["best_id"])
+            g9, g10 = st.columns(2)
+            chart(fig_pa, "pareto", g9)
+            with g10:
+                SCATTER_VIEWS = {"안정형": "stable", "총수령액 극대화형": "maximize", "상속중시형": "bequest"}
+                sview = SCATTER_VIEWS[st.segmented_control("색 기준(관점)", list(SCATTER_VIEWS),
+                                                           default="안정형", key="scatterview") or "안정형"]
+                fig_sc = viz.fig_score_scatter(df, sview, best_id=int(tops[sview].iloc[0]["id"]))
+                chart(fig_sc, "scatter")
+
+        report_figs += [("① 연령별 월 현금흐름", fig_cf), ("② 연령별 누적자산", fig_as),
+                        (f"③ 누적 수령액·원금확보 ({h_lbl})", fig_h),
+                        (f"③ 누적 수령액·원금확보 ({w_lbl})", fig_w)]
+        if fig_ho is not None:
+            report_figs.append(("④ 주택연금 개시별 부족액", fig_ho))
+        report_figs += [("⑤ 국민×주택 히트맵", fig_hz), ("⑥ 물가상승률별 부족액", fig_in),
+                        ("⑦ 기대수명별 전략", fig_li), ("⑧ Pareto Frontier", fig_pa),
+                        ("⑨ 조합별 점수 산점도", fig_sc), ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
+
+        with tabs[5]:
+            ui.section("download", "내보내기", "리포트·표를 파일로 저장 (파일도 브라우저 안에서 생성됩니다)")
+            summary = {
+                "n_combos": R["n"],
+                "normal_ages": (f"정상개시 남편({pension.type_label(user.husband)}) "
+                                f"{pension.normal_start_age(user.husband, cfg)}세 / "
+                                f"아내({pension.type_label(user.wife)}) "
+                                f"{pension.normal_start_age(user.wife, cfg)}세"),
+                "margin": m_report,
+                "inputs": [
+                    ("남편", f"{pension.type_label(user.husband)} · {user.husband.birth_year}년생 · "
+                             f"월 {user.husband.nps_monthly:,.0f}원 · 납입원금 {user.husband.paid_principal:,.0f}원 · "
+                             f"기대수명 {user.husband_life_expectancy}세"),
+                    ("아내", f"{pension.type_label(user.wife)} · {user.wife.birth_year}년생 · "
+                             f"월 {user.wife.nps_monthly:,.0f}원 · 납입원금 {user.wife.paid_principal:,.0f}원 · "
+                             f"기대수명 {user.wife_life_expectancy}세"),
+                    ("은퇴나이 / 월 생활비", f"{user.retirement_age}세 / {user.living_expense_monthly:,.0f}원"),
+                    ("금융자산 / 투자수익률", f"{user.financial_assets:,.0f}원 / {user.investment_return*100:.1f}%"),
+                    ("물가상승률", f"{user.inflation_rate*100:.1f}%"),
+                    ("주택", (f"{user.house_value:,.0f}원 · 주택연금 월 {user.housing_monthly_base:,.0f}원"
+                              if user.use_housing_pension else "주택연금 미사용")),
+                    ("세금·건보 / 기초연금",
+                     f"연금소득 실효 {(cfg.tax.pension_tax_rate+cfg.tax.health_insurance_rate)*100:.0f}% 차감 · "
+                     f"기초연금 {'수급' if user.basic_pension_eligible else '비대상'}"),
+                ],
+            }
+            # 파일 생성(특히 plotly.js 를 통째로 넣는 HTML 리포트)은 무거우므로 한 번 만든 결과를 재사용.
+            key = (repr(snap[:2]), sview)
+            ex = st.session_state.get("exports")
+            if not ex or ex["key"] != key:
+                ex = {"key": key,
+                      "report": export.build_html_report(report_figs, tops, summary),
+                      "csv": export.to_csv_bytes(df),
+                      "xlsx": export.to_excel_bytes(df, best_scenario)}
+                st.session_state["exports"] = ex
+            e1, e2, e3 = st.columns(3)
+            e1.download_button("전체 리포트 (HTML · PDF 저장용)", ex["report"], "노후자금리포트.html", "text/html",
+                               type="primary", width="stretch")
+            e2.download_button("CSV (전체 조합)", ex["csv"], "nps_result.csv", "text/csv",
+                               width="stretch")
+            e3.download_button("Excel (요약 + 월별)", ex["xlsx"], "nps_result.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               width="stretch")
+            st.caption("리포트 파일을 열고 Ctrl+P → '대상: PDF로 저장' 하면 한글·그래프 그대로 PDF가 됩니다.")
+
+        st.caption("본 도구의 연금·주택연금 금액은 근사 계산이며 실제 수급액과 다를 수 있습니다. "
+                   "정확한 금액은 국민연금공단·한국주택금융공사·복지로의 공식 계산기로 확인하세요.")
 
 
 if __name__ == "__main__":

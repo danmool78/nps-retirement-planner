@@ -33,7 +33,7 @@ C_NET = "#059669"      # 순현금흐름·안전
 C_ASSET = "#7C3AED"    # 자산
 C_ACCENT = "#D97706"   # 추천(별표)
 C_MUTED = "#64748B"    # 보조선·주석
-FONT = "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif"
+FONT = "'Pretendard Variable', Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif"
 
 
 def _style(fig: go.Figure, height: int = 400) -> go.Figure:

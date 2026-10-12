@@ -107,7 +107,8 @@ LOGO = ('<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox=
 # ---------------------------------------------------------------------------
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+/* Pretendard: 한글·숫자 모두 또렷한 UI 글꼴(가변 굵기, 필요한 글자만 내려받는 subset) */
+@import url('https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css');
 :root{
   --ink:#0F172A; --ink2:#334155; --muted:#64748B; --line:#E2E8F0; --soft:#F8FAFC;
   --brand:#1D4ED8; --brand-soft:#EFF6FF; --good:#059669; --good-soft:#ECFDF5;
@@ -116,8 +117,45 @@ _CSS = """
 /* 아이콘 폰트(Material Symbols)는 건드리지 않도록 본문 텍스트 요소에만 글꼴 지정 */
 .stApp, .stMarkdown, .stMarkdown p, label, input, textarea,
 .stTabs button[role="tab"] p, .stButton button p, .stDownloadButton button p{
-  font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  font-family:'Pretendard Variable',Pretendard,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
 }
+/* 숫자는 고정폭(tabular)으로 맞춰 자릿수가 흔들리지 않게 */
+.kcard .val, .rank .score, .rank .facts, table.bd td, .stApp input{
+  font-variant-numeric:tabular-nums; font-feature-settings:'tnum' 1, 'ss06' 1;
+}
+
+/* 입력창: 사이드바 배경을 한 톤 어둡게, 입력 칸은 흰 바탕 + 회색 테두리, 포커스 시 파란 테두리 */
+[data-testid="stSidebar"]{background:#EEF2F7 !important;}
+[data-testid="stSidebar"] hr{border-color:#D5DDE8;}
+[data-testid="stNumberInputContainer"], [data-testid="stSelectbox"] > div:last-child > div,
+[data-testid="stTextInputRootElement"]{
+  background:#FFFFFF !important; border:1px solid #C3CEDD !important; border-radius:10px !important;
+  box-shadow:0 1px 1px rgba(15,23,42,.04);
+}
+[data-testid="stNumberInputContainer"]:focus-within, [data-testid="stSelectbox"] > div:last-child > div:focus-within,
+[data-testid="stTextInputRootElement"]:focus-within{
+  border-color:#1D4ED8 !important; box-shadow:0 0 0 3px rgba(29,78,216,.15);
+}
+[data-testid="stNumberInputField"]{font-weight:600; color:#0F172A;}
+[data-testid="stSidebar"] [data-testid="stExpander"] details{background:#F8FAFC; border:1px solid #D5DDE8; border-radius:12px;}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{color:#334155; font-weight:500;}
+
+/* 계산 중 로딩 화면 */
+.loading{display:flex; flex-direction:column; align-items:center; gap:14px; padding:56px 16px;
+         border:1px solid var(--line); border-radius:16px; background:linear-gradient(180deg,#F5F9FF,#fff); margin:1rem 0;}
+.loading .ring{width:46px; height:46px; border-radius:50%; border:4px solid #DBEAFE; border-top-color:var(--brand);
+               animation:spin .9s linear infinite;}
+.loading b{font-size:1.02rem; color:var(--ink);}
+.loading p{margin:0; font-size:.86rem; color:var(--muted); text-align:center; line-height:1.6;}
+.loading .bar{width:min(260px,70%); height:4px; border-radius:4px; background:#E2E8F0; overflow:hidden;}
+.loading .bar i{display:block; height:100%; width:40%; background:var(--brand); border-radius:4px; animation:slide 1.3s ease-in-out infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+@keyframes slide{0%{transform:translateX(-100%);} 100%{transform:translateX(250%);}}
+@media (prefers-reduced-motion: reduce){ .loading .ring{animation-duration:2.4s;} .loading .bar i{animation:none; width:100%;} }
+/* 계산이 도는 동안 Streamlit 은 이전 결과를 흐리게 남겨두는데, 로딩 화면이 떠 있는 동안에는
+   이전 결과를 숨기고 로딩 화면만 선명하게 보여준다. */
+[data-stale="true"]:has(.loading){opacity:1 !important; filter:none !important;}
+[data-testid="stMain"]:has(.loading) [data-stale="true"]:not(:has(.loading)){display:none !important;}
 .block-container{padding-top:3.5rem; padding-bottom:4rem; max-width:1280px;}
 svg.ic{vertical-align:-0.2em; flex:none;}
 
@@ -258,6 +296,13 @@ table.pol .sm{color:var(--muted); font-size:.72rem;}
 }
 </style>
 """
+
+
+def loading(target=st):
+    """계산 중 로딩 화면(CSS 애니메이션이라 계산으로 Python 이 멈춰 있어도 계속 돈다)."""
+    _html('<div class="loading"><div class="ring"></div><b>시뮬레이션 계산 중</b>'
+          '<p>모든 수령나이·주택연금 조합을 물가 스트레스와 몬테카를로까지 포함해 평가하고 있습니다.<br>'
+          '기기 성능에 따라 수 초~수십 초 걸립니다.</p><div class="bar"><i></i></div></div>', target)
 
 
 def inject_css():
