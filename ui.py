@@ -255,6 +255,17 @@ table.bd th, table.bd td{padding:9px 12px; border-bottom:1px solid var(--line); 
 table.bd thead th{background:var(--soft); color:var(--muted); font-weight:500;}
 table.bd tbody th{text-align:left; font-weight:500; color:var(--ink2);}
 table.bd tr.total th, table.bd tr.total td{font-weight:700; color:var(--ink); background:var(--brand-soft); border-bottom:none;}
+table.bd.sc td{text-align:center;}
+table.bd.sc tbody th{white-space:normal; min-width:96px;}
+table.bd.sc td.best{color:#047857; font-weight:700; background:#ECFDF5;}
+table.bd.sc thead th{text-align:center; color:var(--ink); font-weight:600;}
+/* 시나리오 행: 좁은 화면에서도 열을 접지 않음 */
+[class*="st-key-scnrow"]{border-top:1px solid var(--line); padding-top:8px;}
+[class*="st-key-scnrow"] [data-testid="stHorizontalBlock"]{flex-wrap:nowrap !important; gap:8px;}
+[class*="st-key-scnrow"] [data-testid="stColumn"]{min-width:0 !important; width:auto !important; flex:1 1 0 !important;}
+[class*="st-key-scnrow"] [data-testid="stColumn"]:first-child{flex:2.4 1 0 !important;}
+[class*="st-key-scnrow"] p{margin:0; font-size:.88rem; line-height:1.4;}
+[class*="st-key-scnrow"] button{min-height:36px; padding:0 6px;}
 /* 제도 기준표(사이드바) */
 table.pol{border-collapse:collapse; width:100%; font-size:.78rem;}
 table.pol th, table.pol td{padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:top; text-align:left;}

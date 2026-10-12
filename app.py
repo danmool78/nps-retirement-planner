@@ -29,6 +29,7 @@ import montecarlo as mc
 import visualization as viz
 import export
 import ui
+import scenarios as scn
 from cashflow import simulate
 from config import (
     Config, NpsPolicy, TeacherPolicy, GovPolicy, HousingPolicy,
@@ -314,6 +315,15 @@ def reset_inputs():
         st.session_state[spec[0]] = spec[2]
     for k in ("hinc", "winc", "preview_age"):
         st.session_state.pop(k, None)
+
+
+def load_inputs_from_query(query: str):
+    """저장된 시나리오의 입력을 위젯 상태로 되돌린다(쿼리에 없는 항목은 기본값)."""
+    from urllib.parse import parse_qs
+    qs = {k: v[0] for k, v in parse_qs(query).items()}
+    for code, spec in PERSIST.items():
+        val = _parse(qs[code], spec) if code in qs else None
+        st.session_state[spec[0]] = spec[2] if val is None else val
 
 
 def dv(key: str) -> dict:
@@ -688,6 +698,48 @@ def whatif_html(d) -> str:
     return f'<div class="wilist">{"".join(rows)}</div>'
 
 
+def render_scenarios(user, R):
+    """시나리오 탭: 현재 결과 저장 + 저장된 시나리오 비교·불러오기·삭제."""
+    items = st.session_state.setdefault("scenarios", [])
+    cur = scn.summarize("현재 결과", st.session_state.get("snap_query", ""), user, R)
+
+    def save(name):
+        lst = st.session_state.setdefault("scenarios", [])
+        name = (name or "").strip() or f"시나리오 {len(lst) + 1}"
+        data = {**cur, "name": name}
+        lst[:] = [x for x in lst if x["name"] != name][-(scn.MAX_SCENARIOS - 1):] + [data]
+
+    def load(idx):
+        load_inputs_from_query(st.session_state["scenarios"][idx]["query"])
+        st.session_state["_autorun"] = True
+
+    def remove(idx):
+        st.session_state["scenarios"].pop(idx)
+
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+    name = c1.text_input("시나리오 이름", placeholder=f"예: 63세 은퇴, 생활비 280만 (비우면 '시나리오 {len(items) + 1}')",
+                         key="scn_name", max_chars=20)
+    c2.button("현재 결과 저장", on_click=save, args=(name,), type="primary", width="stretch", key="scn_save")
+    st.caption(f"최대 {scn.MAX_SCENARIOS}개까지 이 탭(세션) 동안 저장됩니다. 입력을 바꿔 다시 실행한 뒤 저장하면 "
+               "결과를 나란히 비교할 수 있습니다. 오래 보관하려면 시나리오의 링크를 저장하세요.")
+
+    if not items:
+        ui.note("info", "아직 저장된 시나리오가 없습니다. 지금 결과를 저장한 뒤, 입력을 바꿔 다시 실행하고 또 저장해 보세요.")
+        return
+    shown = items + ([cur] if all(x["query"] != cur["query"] for x in items) else [])
+    st.markdown(scn.table_html(shown), unsafe_allow_html=True)
+    st.caption("행마다 가장 좋은 값을 초록색으로 표시합니다. 모두 안정형 1위 전략 기준입니다.")
+
+    for i, it in enumerate(items):
+        # 모바일에서도 이름·버튼이 한 줄에 나란히 오도록(CSS: scnrow 는 열을 접지 않음).
+        with st.container(key=f"scnrow_{i}"):
+            a, b2, c = st.columns([3, 1.2, 1], vertical_alignment="center")
+            a.markdown(f"**{_html.escape(it['name'])}**  \n{_html.escape(it['inputs'])}")
+            b2.button("불러오기", key=f"scn_load_{i}", on_click=load, args=(i,), width="stretch",
+                      help="이 시나리오의 입력으로 되돌리고 다시 계산합니다.")
+            c.button("삭제", key=f"scn_del_{i}", on_click=remove, args=(i,), width="stretch")
+
+
 def margin_text(margin, cfg, user) -> tuple[str, str, str]:
     """물가 안전 마진 → (카드 값, 카드 보조문구, 리포트 문장)."""
     if margin is None:
@@ -762,10 +814,13 @@ def main():
         if prev is None or repr(prev[:2]) != repr((new_user, new_cfg)):
             st.session_state["_pending"] = True
         st.session_state["snap"] = (new_user, new_cfg, new_mode)
+        st.session_state["snap_query"] = current_query()   # 시나리오 저장·불러오기용 입력값
         st.session_state.pop("exports", None)
         st.session_state["_sidebar"] = "close"   # 모바일: 실행하면 입력창을 닫고 결과를 보여줌
 
     run_args = (user, cfg, basic_mode)
+    if st.session_state.pop("_autorun", False):   # 시나리오 '불러오기' 직후 자동 실행
+        run(*run_args)
 
     def open_inputs():
         st.session_state["_sidebar"] = "open"
@@ -854,7 +909,7 @@ def main():
 
         # 3) 탭 ---------------------------------------------------------------------
         # 탭 이름은 모바일 한 화면에 최대한 들어가도록 짧게.
-        tabs = st.tabs(["추천", "만약에", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
+        tabs = st.tabs(["추천", "만약에", "시나리오", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
         report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
 
         with tabs[0]:
@@ -880,6 +935,10 @@ def main():
                        "실제 적용 전에는 입력을 바꿔 다시 실행해 보세요.")
 
         with tabs[2]:
+            ui.section("scale", "시나리오 비교", "조건을 바꿔 가며 저장한 결과를 나란히 비교")
+            render_scenarios(user, R)
+
+        with tabs[3]:
             ui.section("coins", "추천 전략 월수입 구성", "세전 연금 → 세금·건보 차감 → 기초·주택연금 가산 (명목 금액)")
             bd = income_breakdown(best_scenario.frame)
             if bd:
@@ -907,7 +966,7 @@ def main():
             fig_mc = viz.fig_montecarlo_fan(MC)
             chart(fig_mc, "montecarlo")
 
-        with tabs[3]:
+        with tabs[4]:
             ui.section("chart", "현금흐름과 자산", "추천 전략(안정형 1위)의 나이별 흐름")
             # 사망 시점(남편 나이축)을 계산해 현금흐름 그래프에 표시.
             wife_start = user.retirement_age - (user.wife.birth_year - user.husband.birth_year)
@@ -920,7 +979,7 @@ def main():
             chart(fig_cf, "cashflow", g1)
             chart(fig_as, "assets", g2)
 
-        with tabs[4]:
+        with tabs[5]:
             ui.section("calendar", "나이별 누적 수령액과 원금확보 시점", "언제부터 받으면 몇 세에 낸 보험료를 회수하는지")
             h_lbl = f"남편·{pension.type_label(user.husband)}"
             w_lbl = f"아내·{pension.type_label(user.wife)}"
@@ -930,7 +989,7 @@ def main():
             chart(fig_h, "receipts", g3)
             chart(fig_w, "receipts", g4)
 
-        with tabs[5]:
+        with tabs[6]:
             ui.section("scale", "전략 비교·민감도", "주택연금 개시나이, 물가, 기대수명에 따라 결과가 어떻게 달라지는지")
             fig_hz = viz.fig_heatmap(df, "shortfall_total")
             g5, g6 = st.columns(2)
@@ -967,7 +1026,7 @@ def main():
                         ("⑦ 기대수명별 전략", fig_li), ("⑧ Pareto Frontier", fig_pa),
                         ("⑨ 조합별 점수 산점도", fig_sc), ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
 
-        with tabs[6]:
+        with tabs[7]:
             ui.section("download", "내보내기", "리포트·표를 파일로 저장 (파일도 브라우저 안에서 생성됩니다)")
             summary = {
                 "n_combos": R["n"],
