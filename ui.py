@@ -193,6 +193,21 @@ svg.ic{vertical-align:-0.2em; flex:none;}
 .concl p:last-child{margin-bottom:0;}
 .concl b{color:var(--ink);}
 
+/* 입력 안내 */
+.gsec{margin:1.1rem 0 .4rem;}
+.gh{display:flex; align-items:center; gap:8px; font-weight:700; color:var(--ink); font-size:1rem; margin-bottom:8px;}
+.gh svg{color:var(--brand);}
+.ggrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px;}
+.gcard{border:1px solid var(--line); border-radius:12px; padding:12px 14px; background:#fff;}
+.gcard .gf{font-weight:700; color:var(--ink); font-size:.93rem;}
+.gcard .gw{color:var(--ink2); font-size:.86rem; line-height:1.6; margin-top:4px; word-break:keep-all;}
+.gcard .gl{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;}
+.gcard .gl a{display:inline-flex; align-items:center; gap:4px; font-size:.78rem; color:var(--brand);
+             background:var(--brand-soft); border-radius:999px; padding:3px 10px; text-decoration:none;}
+.gcard .gl a:hover{text-decoration:underline;}
+.gcard .gt{display:flex; gap:6px; align-items:flex-start; margin-top:8px; font-size:.78rem; color:var(--muted); line-height:1.5;}
+.gcard .gt svg{margin-top:2px; color:var(--brand);}
+
 /* 만약에(what-if) 목록 */
 .wilist{display:flex; flex-direction:column; gap:8px; margin:.4rem 0 .6rem;}
 .wi{display:grid; grid-template-columns:minmax(180px,1.4fr) 1fr 1fr; gap:6px 14px; align-items:center;
@@ -309,6 +324,7 @@ table.pol .sm{color:var(--muted); font-size:.72rem;}
   .note{font-size:.82rem; padding:10px 12px;}
   .concl{padding:13px 14px;}
   .wi{grid-template-columns:1fr 1fr; padding:10px 12px; font-size:.84rem;}
+  .ggrid{grid-template-columns:1fr;}
   .wi .wl{grid-column:1 / -1;}
   .concl p{font-size:.88rem; line-height:1.65;}
   .concl p:first-of-type{font-size:.96rem;}

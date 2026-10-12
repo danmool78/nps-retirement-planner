@@ -29,6 +29,7 @@ import montecarlo as mc
 # visualization·export 는 plotly 를 불러와 무겁다 → 결과를 그릴 때만 불러온다(첫 화면 표시를 빠르게).
 import ui
 import scenarios as scn
+import guide as input_guide   # 입력 안내 페이지(그래프 설명용 guide() 함수와 이름 구분)
 from cashflow import simulate
 from config import (
     Config, NpsPolicy, TeacherPolicy, GovPolicy, HousingPolicy,
@@ -348,12 +349,15 @@ def person_inputs(key: str, P: dict):
     ptype = PENSION_TYPES[st.selectbox("연금 종류", list(PENSION_TYPES), key=f"{key}pt")]
     c1, c2 = st.columns(2)
     birth = c1.number_input("출생연도", 1940, 2000, key=f"{key}b", **dv(f"{key}b"))
-    life = c2.number_input("기대수명(세)", 70, 110, key=f"{key}l", **dv(f"{key}l"))
+    life = c2.number_input("기대수명(세)", 70, 110, key=f"{key}l", **dv(f"{key}l"),
+                           help="통계청 생명표의 기대여명을 현재 나이에 더한 값. 넉넉히 잡는 편이 안전")
     monthly = st.number_input("정상개시 기준 연금 월액(원)", 0, 5_000_000, step=50_000,
-                              key=f"{key}n", help="연금공단 예상연금 조회의 '정상 수령나이 기준 월액'",
+                              key=f"{key}n",
+                              help="정상 수령나이 기준 예상 월액(현재가치). 확인: 국민연금공단·통합연금포털 예상연금 조회",
                               **dv(f"{key}n"))
     principal = st.number_input("지금까지 낸 보험료 총액(만원)", 0, 100_000, step=100,
-                                key=f"{key}pp", help="원금확보(손익분기) 시점 계산에 사용",
+                                key=f"{key}pp",
+                                help="원금확보(손익분기) 계산용. 확인: 국민연금공단 가입내역·납부내역 조회",
                                 **dv(f"{key}pp")) * 10_000
 
     # 추납은 국민연금 전용 → 직역연금(교직원·공무원)이면 비활성화.
@@ -407,7 +411,8 @@ def build_inputs(P: dict):
     living = c2.number_input("월 생활비(만원)", 0, 2_000, step=10, key="lv",
                              help="1인 생활비, 현재가치" if single else "부부 합산, 현재가치",
                              **dv("lv")) * 10_000
-    assets = c1.number_input("금융자산(억원)", 0.0, 500.0, step=0.1, key="as", **dv("as")) * 100_000_000
+    assets = c1.number_input("금융자산(억원)", 0.0, 500.0, step=0.1, key="as", **dv("as"),
+                             help="예금·증권 잔액 합계(개인연금 제외). 확인: 계좌통합관리서비스") * 100_000_000
     invest = c2.number_input("투자수익률(%)", 0.0, 10.0, step=0.5, key="ir", **dv("ir")) / 100
     inflation = c1.number_input("물가상승률(%)", 0.0, 6.0, step=0.5, key="inf", **dv("inf")) / 100
     volatility = c2.number_input("투자 변동성(%)", 0.0, 40.0, step=1.0, key="vol",
@@ -442,7 +447,7 @@ def build_inputs(P: dict):
 
     with sb.expander("개인·퇴직연금 (IRP·연금저축)"):
         pp_bal = st.number_input("적립금 합계(억원)", 0.0, 100.0, step=0.1, key="ppb",
-                                 help="은퇴 시점 IRP·연금저축·DC형 퇴직연금 적립금 합계(부부 합산). 0이면 반영 안 함",
+                                 help="IRP·연금저축·DC형 퇴직연금 적립금 합계(부부 합산). 확인: 통합연금포털. 0이면 반영 안 함",
                                  **dv("ppb")) * 100_000_000
         p1, p2 = st.columns(2)
         pp_start = p1.number_input("수령 시작 나이", 55, 90, key="pps", **dv("pps"),
@@ -465,7 +470,8 @@ def build_inputs(P: dict):
     sb.divider()
     ui.side_header("home", "주택연금")
     use_house = sb.toggle("주택연금 사용", key="uh", **dv("uh"))
-    house_val = sb.number_input("주택가격(억원)", 0.0, 500.0, step=0.1, key="hv", **dv("hv")) * 100_000_000
+    house_val = sb.number_input("주택가격(억원)", 0.0, 500.0, step=0.1, key="hv", **dv("hv"),
+                                help="시세. 확인: KB부동산·국토부 실거래가") * 100_000_000
     auto_house = sb.toggle("주택가격으로 월지급액 자동 산정", key="ah",
                            help="HF 종신·정액형 표 기준. 가입 상한(공시가격 기준) 자동 적용.", **dv("ah"))
     house_cap = P.get("housing_price_cap", 1_200_000_000)
@@ -835,7 +841,7 @@ def margin_text(margin, cfg, user) -> tuple[str, str, str]:
 def render_landing(user, cfg):
     ui.steps([
         ("couple", "부부 정보 입력", "입력창에서 남편·아내의 연금 종류, 예상 월액, 기대수명을 입력합니다. "
-                                  "모바일에서는 위의 '입력값 입력하기' 버튼으로 입력창을 엽니다."),
+                                  "값을 어디서 확인하는지는 아래 '입력값 준비 안내'에 정리돼 있습니다."),
         ("wallet", "생활비·자산·주택", "월 생활비, 금융자산, 주택가격과 주택연금 사용 여부를 정합니다."),
         ("target", "시뮬레이션 실행", "수령나이·주택연금 개시나이의 모든 조합을 물가 스트레스까지 포함해 평가하고 "
                                    "성향별 최적 전략을 추천합니다."),
@@ -889,6 +895,7 @@ def main():
     # 실행 버튼을 누른 시점의 입력을 스냅샷으로 고정 → 이후 입력을 바꿔도 결과는 그대로 유지되고,
     # 입력을 바꿀 때마다 무거운 계산이 다시 돌지 않는다(브라우저 계산이라 특히 중요).
     def run(new_user, new_cfg, new_mode):
+        st.session_state["view"] = "main"
         # 입력값은 버튼을 그린 시점의 값을 인자로 고정해 받는다. (클로저로 user/cfg 를 참조하면
         # 아래에서 user, cfg 가 이전 스냅샷으로 다시 대입되므로 새 입력이 무시되는 버그가 생긴다.)
         # 입력이 바뀐 실행이면 먼저 로딩 화면만 보여주고 다음 실행에서 계산한다(아래 body 참고).
@@ -907,11 +914,18 @@ def main():
     def open_inputs():
         st.session_state["_sidebar"] = "open"
 
+    def show_guide(on: bool):
+        st.session_state["view"] = "guide" if on else "main"
+        if on:
+            st.session_state["_sidebar"] = "close"   # 모바일: 입력창을 닫고 안내를 보여줌
+
     run_slot.button("시뮬레이션 실행", type="primary", width="stretch", on_click=run, args=run_args, key="run_side")
     s1, s2 = run_slot.columns(2)
     ui.share_button(target=s1)
     s2.button("입력 초기화", on_click=reset_inputs, key="reset_inputs", width="stretch",
               help="모든 입력을 기본값으로 되돌립니다.")
+    run_slot.button("입력 안내: 어디서 무엇을 보고 넣나", key="guide_side", on_click=show_guide, args=(True,),
+                    width="stretch", icon=None)
     run_slot.caption("입력값은 주소(URL)에 자동 저장됩니다. 링크를 보내면 같은 입력으로 열립니다.")
 
     # 본문 전체를 한 자리(body)에 그린다. 실행 직후에는 이 자리를 로딩 화면으로 통째로 바꿔
@@ -936,12 +950,23 @@ def main():
         ui.sidebar_action(st.session_state.pop("_sidebar"))
 
     with body.container():
+        if st.session_state.get("view") == "guide":
+            ui.section("book", "입력 안내", "각 입력값을 어디서 무엇을 보고 넣으면 되는지")
+            st.button("← 시뮬레이터로 돌아가기", key="guide_back_top", on_click=show_guide, args=(False,))
+            st.markdown(input_guide.render_html(ui.svg), unsafe_allow_html=True)
+            st.button("← 시뮬레이터로 돌아가기", key="guide_back", on_click=show_guide, args=(False,),
+                      type="primary")
+            return
         snap = st.session_state.get("snap")
         if snap is None:
             # 모바일에서는 입력창이 접혀 있으므로 본문에서 바로 열 수 있게(넓은 화면에서는 CSS 로 숨김).
             st.button("입력값 입력하기", on_click=open_inputs, key="open_inputs")
             render_landing(user, cfg)
-            st.button("시뮬레이션 실행", type="primary", on_click=run, args=run_args, key="run_main")
+            b1, b2 = st.columns(2)
+            b1.button("시뮬레이션 실행", type="primary", on_click=run, args=run_args, key="run_main",
+                      width="stretch")
+            b2.button("입력값 준비 안내 보기", on_click=show_guide, args=(True,), key="guide_main",
+                      width="stretch")
             return
         # 로딩 화면은 본문 첫 자리에 둬서 1단계에서 띄운 로딩과 같은 자리를 이어받게 한다(겹침 방지).
         # 실제 계산이 도는 실행에서만 표시(캐시된 결과로 다시 그릴 때 깜빡이지 않게).
