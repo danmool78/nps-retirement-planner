@@ -350,7 +350,7 @@ def person_inputs(key: str, P: dict):
     c1, c2 = st.columns(2)
     birth = c1.number_input("출생연도", 1940, 2000, key=f"{key}b", **dv(f"{key}b"))
     life = c2.number_input("기대수명(세)", 70, 110, key=f"{key}l", **dv(f"{key}l"),
-                           help="통계청 생명표의 기대여명을 현재 나이에 더한 값. 넉넉히 잡는 편이 안전")
+                           help="국가데이터처(옛 통계청) 생명표의 기대여명을 현재 나이에 더한 값. 넉넉히 잡는 편이 안전")
     monthly = st.number_input("정상개시 기준 연금 월액(원)", 0, 5_000_000, step=50_000,
                               key=f"{key}n",
                               help="정상 수령나이 기준 예상 월액(현재가치). 확인: 국민연금공단·통합연금포털 예상연금 조회",
