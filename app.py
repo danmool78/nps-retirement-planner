@@ -26,8 +26,7 @@ import policy
 import housing_pension as hp
 import optimizer as opt
 import montecarlo as mc
-import visualization as viz
-import export
+# visualization·export 는 plotly 를 불러와 무겁다 → 결과를 그릴 때만 불러온다(첫 화면 표시를 빠르게).
 import ui
 import scenarios as scn
 from cashflow import simulate
@@ -959,6 +958,8 @@ def main():
             return
 
         single = user.is_single
+        import visualization as viz   # 지연 로딩(plotly)
+        import export
         viz.SINGLE = single   # 그래프의 '남편/본인' 표기 전환
         df, pareto, tops = R["df"], R["pareto"], R["tops"]
         best_row = tops["stable"].iloc[0]

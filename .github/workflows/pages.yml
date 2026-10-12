@@ -27,7 +27,8 @@ jobs:
       - name: 사이트 파일 모으기
         run: |
           mkdir -p _site
-          cp index.html *.py policy.json _site/
+          cp index.html *.py policy.json manifest.webmanifest sw.js _site/
+          cp -r icons _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
