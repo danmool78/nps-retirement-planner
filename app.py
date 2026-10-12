@@ -29,6 +29,7 @@ import montecarlo as mc
 import visualization as viz
 import export
 import ui
+import scenarios as scn
 from cashflow import simulate
 from config import (
     Config, NpsPolicy, TeacherPolicy, GovPolicy, HousingPolicy,
@@ -118,10 +119,11 @@ GRAPH_GUIDES = {
     "breakdown": """
 **월수입 구성표 읽는 법** — 추천 전략에서 나이별로 매달 실제 손에 쥐는 돈의 구성.
 - **공적연금(세전)** = 국민·교직원·공무원+유족연금 합(세금 떼기 전).
-- **− 세금·건보** = 연금소득세+건강보험료로 빠지는 금액.
+- **− 세금·건보** = 연금소득세 + 건강보험료(피부양자면 0, 탈락하면 지역가입자 보험료)로 빠지는 금액.
 - **실수령 연금** = 세전에서 세금·건보를 뺀 실제 받는 연금.
 - **+ 기초연금** = 65세부터 추가(부부 동시 수급 시 각 감액).
 - **+ 주택연금** = 주택연금 월지급액(비과세).
+- **+ 개인·퇴직연금(세후)** = IRP·연금저축 등을 수령기간 동안 나눠 받은 금액에서 연금소득세를 뺀 것.
 - **= 월 실수령 합계** = 그 나이에 매달 실제 들어오는 총액. 생활비와 비교하면 됩니다.
 """,
     "montecarlo": """
@@ -208,6 +210,7 @@ BASIC_MODES = {
     "무조건 수급": "on",
     "무조건 미수급": "off",
 }
+HOUSEHOLDS = {"부부": "couple", "1인 가구": "single"}
 # 국민연금 월액 → 월소득 역산 근사(소득대체율 약 33% 가정 → 소득 ≈ 연금월액 × 3).
 NPS_TO_INCOME_MULT = 3.0
 
@@ -221,6 +224,7 @@ NPS_TO_INCOME_MULT = 3.0
 # ---------------------------------------------------------------------------
 # URL 코드 → (위젯 key, 종류, 기본값, 최소, 최대). 종류: int / float / bool / 선택지 dict(라벨→코드)
 PERSIST = {
+    "hh": ("hh", HOUSEHOLDS, "부부", None, None),
     "hpt": ("hpt", PENSION_TYPES, "국민연금", None, None),
     "hb": ("hb", "int", 1965, 1940, 2000),
     "hl": ("hl", "int", 86, 70, 110),
@@ -250,7 +254,13 @@ PERSIST = {
     "ah": ("ah", "bool", True, None, None),
     "hm": ("hm", "int", 120, 0, 1_000),
     "tx": ("tx", "float", 4.0, 0.0, 30.0),
-    "hi": ("hi", "float", 4.0, 0.0, 20.0),
+    "dep": ("dep", "bool", True, None, None),
+    "e75": ("e75", "int", 100, 50, 130),
+    "e85": ("e85", "int", 100, 40, 130),
+    "med": ("med", "int", 0, 0, 1_000),
+    "ppb": ("ppb", "float", 0.0, 0.0, 100.0),
+    "pps": ("pps", "int", 60, 55, 90),
+    "ppy": ("ppy", "int", 20, 5, 40),
     "dr": ("dr", "float", 2.0, 0.0, 10.0),
 }
 _SPEC_BY_KEY = {spec[0]: spec for spec in PERSIST.values()}
@@ -316,6 +326,15 @@ def reset_inputs():
         st.session_state.pop(k, None)
 
 
+def load_inputs_from_query(query: str):
+    """저장된 시나리오의 입력을 위젯 상태로 되돌린다(쿼리에 없는 항목은 기본값)."""
+    from urllib.parse import parse_qs
+    qs = {k: v[0] for k, v in parse_qs(query).items()}
+    for code, spec in PERSIST.items():
+        val = _parse(qs[code], spec) if code in qs else None
+        st.session_state[spec[0]] = spec[2] if val is None else val
+
+
 def dv(key: str) -> dict:
     """위젯 기본값 인자. 이미 상태(URL 복원·사용자 입력)가 있으면 value 를 넘기지 않는다
     (넘기면 Streamlit 이 '기본값과 세션 상태가 동시에 지정됨' 경고를 띄운다)."""
@@ -365,20 +384,29 @@ def build_inputs(P: dict):
     """사이드바 위젯을 그려 UserInput 과 Config 를 반환. P = 오늘 시행 중인 제도값."""
     sb = st.sidebar
 
-    # --- 부부 정보 -------------------------------------------------------------
-    ui.side_header("couple", "부부 정보")
-    t_h, t_w = sb.tabs(["남편", "아내"])
-    with t_h:
-        h_args, h_life = person_inputs("h", P)
-    with t_w:
-        w_args, w_life = person_inputs("w", P)
+    # --- 가구·본인/부부 정보 ---------------------------------------------------
+    household = HOUSEHOLDS[sb.radio("가구 형태", list(HOUSEHOLDS), key="hh", horizontal=True)]
+    single = household == "single"
+    if single:
+        ui.side_header("couple", "본인 정보")
+        with sb.container():
+            h_args, h_life = person_inputs("h", P)
+        w_args = w_life = None
+    else:
+        ui.side_header("couple", "부부 정보")
+        t_h, t_w = sb.tabs(["남편", "아내"])
+        with t_h:
+            h_args, h_life = person_inputs("h", P)
+        with t_w:
+            w_args, w_life = person_inputs("w", P)
 
     # --- 생활·자산 -------------------------------------------------------------
     sb.divider()
     ui.side_header("wallet", "생활·자산")
     c1, c2 = sb.columns(2)
-    retire_age = c1.number_input("은퇴나이(남편)", 50, 75, key="ra", **dv("ra"))
-    living = c2.number_input("월 생활비(만원)", 0, 2_000, step=10, key="lv", help="부부 합산, 현재가치",
+    retire_age = c1.number_input("은퇴나이" if single else "은퇴나이(남편)", 50, 75, key="ra", **dv("ra"))
+    living = c2.number_input("월 생활비(만원)", 0, 2_000, step=10, key="lv",
+                             help="1인 생활비, 현재가치" if single else "부부 합산, 현재가치",
                              **dv("lv")) * 10_000
     assets = c1.number_input("금융자산(억원)", 0.0, 500.0, step=0.1, key="as", **dv("as")) * 100_000_000
     invest = c2.number_input("투자수익률(%)", 0.0, 10.0, step=0.5, key="ir", **dv("ir")) / 100
@@ -386,6 +414,18 @@ def build_inputs(P: dict):
     volatility = c2.number_input("투자 변동성(%)", 0.0, 40.0, step=1.0, key="vol",
                                  help="수익률의 연 표준편차. 클수록 폭락 위험이 큼(몬테카를로에 사용)",
                                  **dv("vol")) / 100
+
+    with sb.expander("나이별 생활비 변화"):
+        def typical_pattern():
+            st.session_state.update({"e75": 90, "e85": 80, "med": 50})
+        st.button("일반적인 패턴 적용", key="exp_typical", on_click=typical_pattern, width="stretch",
+                  help="75세부터 90%, 85세부터 80%, 85세부터 의료·간병비 월 50만원")
+        e1, e2 = st.columns(2)
+        e75 = e1.number_input("75세부터(%)", 50, 130, step=5, key="e75", **dv("e75"),
+                              help="은퇴 초기 생활비 대비. 활동이 줄면 보통 낮아집니다.")
+        e85 = e2.number_input("85세부터(%)", 40, 130, step=5, key="e85", **dv("e85"))
+        med = st.number_input("85세부터 의료·간병비(만원/월)", 0, 1_000, step=10, key="med", **dv("med"),
+                              help="현재가치. 물가와 함께 오릅니다.") * 10_000
 
     with sb.expander("기타 소득·재산"):
         other_income = st.number_input("기타 월소득(만원)", 0, 2_000, step=10, key="oi",
@@ -397,11 +437,25 @@ def build_inputs(P: dict):
         other_property = st.number_input("기타 재산(억원)", 0.0, 500.0, step=0.1, key="op",
                                          help="주택·금융자산 외 다른 부동산·자동차 등. 기초연금 판정·상속에 반영",
                                          **dv("op")) * 100_000_000
-        single_ratio = st.number_input("홀로 생존 시 생활비 비율", 0.4, 1.0, step=0.05, key="sr",
-                                       help="1인 가구 생활비 / 부부 생활비", **dv("sr"))
+        single_ratio = 1.0 if single else st.number_input(
+            "홀로 생존 시 생활비 비율", 0.4, 1.0, step=0.05, key="sr",
+            help="1인 가구 생활비 / 부부 생활비", **dv("sr"))
 
-    with sb.expander("유족연금·기초연금 처리"):
-        survivor_mode = SURV_MODES[st.selectbox(
+    with sb.expander("개인·퇴직연금 (IRP·연금저축)"):
+        pp_bal = st.number_input("적립금 합계(억원)", 0.0, 100.0, step=0.1, key="ppb",
+                                 help="은퇴 시점 IRP·연금저축·DC형 퇴직연금 적립금 합계(부부 합산). 0이면 반영 안 함",
+                                 **dv("ppb")) * 100_000_000
+        p1, p2 = st.columns(2)
+        pp_start = p1.number_input("수령 시작 나이", 55, 90, key="pps", **dv("pps"),
+                                   help="남편 나이 기준" if not single else None)
+        pp_years = p2.number_input("수령 기간(년)", 5, 40, key="ppy", **dv("ppy"),
+                                   help="10년 이상 나눠 받아야 연금수령한도 안에서 저율과세에 유리")
+        if pp_bal > 0:
+            st.caption("수령 전까지 투자수익률로 불어나고 기간 동안 균등 수령. 연 1,500만원 이하면 3.3~5.5%, "
+                       "초과하면 16.5% 분리과세로 계산합니다. 건보료 산정에서는 제외됩니다.")
+
+    with sb.expander("기초연금 처리" if single else "유족연금·기초연금 처리"):
+        survivor_mode = "auto" if single else SURV_MODES[st.selectbox(
             "배우자 사망 시 유족연금", list(SURV_MODES), key="sm",
             help="본인 노령연금+유족연금 일부 vs 유족연금 전액 중 무엇을 받을지. 자동은 유리한 쪽을 택합니다.")]
         basic_mode = BASIC_MODES[st.selectbox(
@@ -424,8 +478,9 @@ def build_inputs(P: dict):
         # 내부 기준월지급액은 60세 기준으로 저장(시뮬레이션이 개시나이별로 환산).
         house_monthly = int(hp.estimate_base_monthly(house_val, _hpol))
         # HF 계산기와 직접 비교되도록 '개시 예정나이(연소자 기준)'의 월지급액을 미리보기로 표시.
-        preview_age = sb.slider("미리보기 개시나이(부부 중 연소자)", 55, 90, 70, key="preview_age",
-                                help="HF 계산기는 부부 중 연소자 나이 기준입니다.")
+        preview_age = sb.slider("미리보기 개시나이" + ("" if single else "(부부 중 연소자)"), 55, 90, 70,
+                                key="preview_age",
+                                help="HF 계산기 기준 나이입니다." if single else "HF 계산기는 부부 중 연소자 나이 기준입니다.")
         preview = hp.monthly_payment(house_monthly, preview_age, _hpol)
         ui.note("info", f"{preview_age}세 개시 시 예상 월지급액 <b>{preview:,.0f}원</b>"
                         f"<br><span style='font-size:.8em'>60세 환산 기준액 {house_monthly:,.0f}원</span>",
@@ -464,25 +519,34 @@ def build_inputs(P: dict):
         t_surv = st.number_input("교직원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0, key="ts") / 100
         g_early = st.number_input("공무원 조기퇴직 연감액률(%)", 0.0, 10.0, 5.0, 0.5, key="ge") / 100
         g_surv = st.number_input("공무원 유족연금 지급률(%)", 0.0, 100.0, 60.0, 5.0, key="gs") / 100
-    with sb.expander("세금·건보·기초연금"):
+    with sb.expander("세금·건강보험·기초연금"):
         tax_rate = st.number_input("연금소득 실효세율(%)", 0.0, 30.0, step=0.5, key="tx",
                                    help="국민·직역·유족연금에 적용(주택연금·기초연금 제외)", **dv("tx")) / 100
-        health_rate = st.number_input("건강보험료율(연금 대비, %)", 0.0, 20.0, step=0.5, key="hi",
-                                      help="은퇴 후 지역가입 근사", **dv("hi")) / 100
+        dep_possible = st.toggle("건보 피부양자로 올릴 직장가입 가족 있음", key="dep",
+                                 help="자녀 등 직장가입자 가족이 있으면 소득·재산 요건을 따져 피부양자 여부를 판정합니다. "
+                                      "없으면 처음부터 지역가입자 보험료를 냅니다.", **dv("dep"))
         basic_amt = st.number_input("기초연금 단독 월액(원)", 0, 1_000_000,
                                     int(P.get("basic_single_amount", 340_000)), 1_000) 
         basic_couple_red = st.number_input("부부 동시수급 감액률(%)", 0.0, 50.0,
                                            P.get("basic_couple_reduction", 0.20) * 100, 5.0) / 100
         basic_crit = st.number_input("기초연금 부부 선정기준액(원)", 0, 20_000_000,
-                                     int(P.get("basic_criteria_couple", 3_650_000)), 10_000,
-                                     help="월 소득인정액이 이 값 이하면 수급 대상")
+                                     int(P.get("basic_criteria_couple", 3_952_000)), 10_000,
+                                     help="월 소득인정액이 이 값 이하면 수급 대상(부부 가구)")
+        basic_crit_single = st.number_input("기초연금 단독 선정기준액(원)", 0, 20_000_000,
+                                            int(P.get("basic_criteria_single", 2_470_000)), 10_000,
+                                            help="월 소득인정액이 이 값 이하면 수급 대상(1인 가구)")
         basic_prop_ded = st.number_input("기본재산공제(만원)", 0, 100_000,
                                          int(P.get("basic_property_deduction", 135_000_000) / 10_000), 500,
                                          help="대도시 기준. 소득인정액 계산 시 일반재산에서 공제") * 10_000
 
     # --- 객체 조립 -------------------------------------------------------------
-    husband = Person("남편", **h_args)
-    wife = Person("아내", **w_args)
+    husband = Person("본인" if single else "남편", **h_args)
+    if single:
+        # 1인 가구: '시작 시점에 이미 없는 배우자'(연금 0, 기대수명=시작나이 → 시뮬레이션 0개월)로 둔다.
+        wife = Person("배우자 없음", birth_year=husband.birth_year, nps_monthly=0, pension_type="nps")
+        w_life = retire_age
+    else:
+        wife = Person("아내", **w_args)
 
     user = UserInput(
         husband=husband, wife=wife,
@@ -494,7 +558,10 @@ def build_inputs(P: dict):
         other_property=other_property,
         husband_life_expectancy=h_life, wife_life_expectancy=w_life,
         house_value=house_val, housing_monthly_base=house_monthly,
-        use_housing_pension=use_house, retirement_age=retire_age,
+        use_housing_pension=use_house, retirement_age=retire_age, household=household,
+        health_dependent_possible=dep_possible,
+        expense_ratio_75=e75 / 100, expense_ratio_85=e85 / 100, late_care_monthly=med,
+        private_pension_balance=pp_bal, private_pension_start_age=pp_start, private_pension_years=pp_years,
     )
 
     cfg = Config(
@@ -505,10 +572,14 @@ def build_inputs(P: dict):
         gov=GovPolicy(early_yearly_reduction=g_early, survivor_pension_rate=g_surv,
                       survivor_dup_rate=dup),
         housing=_hpol,
-        tax=TaxPolicy(pension_tax_rate=tax_rate, health_insurance_rate=health_rate),
+        tax=TaxPolicy(pension_tax_rate=tax_rate,
+                      **{k: P[k] for k in ("health_rate", "ltc_ratio", "dependent_income_limit",
+                                           "dependent_property_limit", "local_pension_ratio",
+                                           "property_premium_per_100m") if k in P}),
         basic=BasicPensionPolicy(
             single_amount=basic_amt, couple_reduction=basic_couple_red,
-            selection_criteria_couple=basic_crit, property_basic_deduction=basic_prop_ded,
+            selection_criteria_couple=basic_crit, selection_criteria_single=basic_crit_single,
+            property_basic_deduction=basic_prop_ded,
             financial_deduction=P.get("basic_financial_deduction", 20_000_000),
             property_conversion_rate=P.get("basic_conversion_rate", 0.04)),
         optimizer=OptimizerConfig(discount_rate=discount),
@@ -536,16 +607,20 @@ def estimate_basic_eligibility(user, cfg):
     """
     bp = cfg.basic
     # 소득평가액(월): 공적연금 + 연금 외 기타소득(근로·임대·이자 등).
-    pension_income = user.husband.nps_monthly + user.wife.nps_monthly + user.other_income_monthly
+    # 개인·퇴직연금은 대략적인 월 수령액(적립금 ÷ 수령개월)으로 반영.
+    private_monthly = user.private_pension_balance / max(1, user.private_pension_years * 12)
+    pension_income = (user.husband.nps_monthly + user.wife.nps_monthly + user.other_income_monthly
+                      + private_monthly)
     general = max(0.0, user.house_value + user.other_property - bp.property_basic_deduction)
     financial = max(0.0, user.financial_assets - bp.financial_deduction)
     property_income = (general + financial) * bp.property_conversion_rate / 12.0
     income_recognition = pension_income + property_income
-    return income_recognition, bp.selection_criteria_couple, income_recognition <= bp.selection_criteria_couple
+    crit = bp.selection_criteria_single if user.is_single else bp.selection_criteria_couple
+    return income_recognition, crit, income_recognition <= crit
 
 
 BREAKDOWN_ROWS = ["공적연금(세전)", "− 세금·건보", "실수령 연금",
-                  "+ 기초연금", "+ 주택연금", "+ 기타소득", "= 월 실수령 합계"]
+                  "+ 기초연금", "+ 주택연금", "+ 기타소득", "+ 개인·퇴직연금(세후)", "= 월 실수령 합계"]
 
 
 def income_breakdown(frame, ages=(65, 70, 75, 80)):
@@ -564,7 +639,8 @@ def income_breakdown(frame, ages=(65, 70, 75, 80)):
         gross = row["h_pension"] + row["w_pension"] + row["survivor_pension"]  # 세전 공적연금
         tax = gross - row["net_taxable"]                                       # 세금·건보 차감액
         cols[f"{age}세"] = [gross, -tax, row["net_taxable"], row["basic_pension"],
-                           row["house_income"], row.get("other_income", 0.0), row["income"]]
+                           row["house_income"], row.get("other_income", 0.0),
+                           row.get("private_pension", 0.0), row["income"]]
     return cols or None
 
 
@@ -590,7 +666,7 @@ def housing_text(row) -> str:
     return f"{int(row['housing'])}세" if row["use_housing"] else "미사용"
 
 
-def render_view(top, view: str, df):
+def render_view(top, view: str, df, single: bool = False):
     """한 관점의 상위 5개 조합을 순위 카드로."""
     cards = []
     for i, (_, row) in enumerate(top.iterrows(), 1):
@@ -599,7 +675,9 @@ def render_view(top, view: str, df):
                  ("총수령(현가)", fmt_eok(row["total_pv"])),
                  ("부족", f"{row['shortfall_months']:.0f}개월"),
                  ("상속", fmt_eok(row["bequest"]))]
-        cards.append(ui.rank_card(i, f"연금 개시 남편 {int(row['h_claim'])}세 · 아내 {int(row['w_claim'])}세",
+        title = (f"연금 개시 {int(row['h_claim'])}세" if single
+                 else f"연금 개시 남편 {int(row['h_claim'])}세 · 아내 {int(row['w_claim'])}세")
+        cards.append(ui.rank_card(i, title,
                                   f"점수 {row[f'score_{view}']:.3f}", facts, pros, cons))
     st.markdown("".join(cards), unsafe_allow_html=True)
 
@@ -621,13 +699,16 @@ def conclusion_html(user, cfg, R) -> str:
     hc, wc = int(b["h_claim"]), int(b["w_claim"])
     hn = pension.normal_start_age(user.husband, cfg)
     wn = pension.normal_start_age(user.wife, cfg)
-    house = (f"주택연금은 남편 {int(b['housing'])}세에 시작하는" if b["use_housing"]
+    single = user.is_single
+    house = (f"주택연금은 {'' if single else '남편 '}{int(b['housing'])}세에 시작하는" if b["use_housing"]
              else "주택연금은 쓰지 않는")
 
-    lines = [f"<b>남편은 {_claim_phrase(hc, hn)}, 아내는 {_claim_phrase(wc, wn)}부터 연금을 받고, "
-             f"{house} 것이 가장 안정적입니다.</b>"]
+    who = (f"{_claim_phrase(hc, hn)}부터" if single
+           else f"남편은 {_claim_phrase(hc, hn)}, 아내는 {_claim_phrase(wc, wn)}부터")
+    lines = [f"<b>{who} 연금을 받고, {house} 것이 가장 안정적입니다.</b>"]
 
-    life = f"기대수명(남편 {user.husband_life_expectancy}세·아내 {user.wife_life_expectancy}세)"
+    life = (f"기대수명({user.husband_life_expectancy}세)" if single else
+            f"기대수명(남편 {user.husband_life_expectancy}세·아내 {user.wife_life_expectancy}세)")
     if float(b["shortfall_months"]) == 0:
         lines.append(f"이렇게 하면 {life}까지 생활비가 모자라지 않고, 마지막에 약 <b>{fmt_eok(b['bequest'])}</b>을 남깁니다.")
     else:
@@ -637,6 +718,11 @@ def conclusion_html(user, cfg, R) -> str:
                      f"<b>{fmt_eok(b['shortfall_total'])}</b>이 부족합니다. 생활비를 줄이거나 은퇴를 늦추는 등의 조정이 필요합니다.")
 
     cautions = []
+    bm = R["best_scenario"].metrics
+    if bm.get("dep_lost_age") is not None and user.health_dependent_possible:
+        who_h = "" if single else "남편 "
+        cautions.append(f"연금 등 소득이 늘어 {who_h}{bm['dep_lost_age']:.0f}세부터 건강보험 피부양자에서 빠져 "
+                        f"월 약 <b>{bm['dep_lost_premium']/1e4:,.0f}만원</b>의 건보료가 생깁니다(계산에 반영됨)")
     sr = R["montecarlo"]["success_rate"] * 100
     if sr < 80 and float(b["shortfall_months"]) == 0:   # 이미 부족이면 위 문장으로 충분
         cautions.append(f"투자 수익이 해마다 흔들리면 끝까지 버틸 확률이 <b>{sr:.0f}%</b>로 낮아집니다")
@@ -651,11 +737,13 @@ def conclusion_html(user, cfg, R) -> str:
     alts = []
     # 차이가 1% 미만이면 의미 없는 잡음이라 생략.
     same = lambda r: (int(r["h_claim"]), int(r["w_claim"]), housing_text(r)) == (hc, wc, housing_text(b))
+    ages = lambda r: (f"{int(r['h_claim'])}세" if single
+                      else f"남편 {int(r['h_claim'])}세·아내 {int(r['w_claim'])}세")
     if not same(m) and m["total_pv"] > b["total_pv"] * 1.01:
-        alts.append(f"평생 받는 총액을 가장 늘리려면 남편 {int(m['h_claim'])}세·아내 {int(m['w_claim'])}세, "
+        alts.append(f"평생 받는 총액을 가장 늘리려면 {ages(m)}, "
                     f"주택연금 {housing_text(m)} (총수령 {fmt_eok(m['total_pv'] - b['total_pv'])} 더)")
     if not same(q) and q["bequest"] > b["bequest"] * 1.01:
-        alts.append(f"남길 재산을 가장 늘리려면 남편 {int(q['h_claim'])}세·아내 {int(q['w_claim'])}세, "
+        alts.append(f"남길 재산을 가장 늘리려면 {ages(q)}, "
                     f"주택연금 {housing_text(q)} (상속 {fmt_eok(q['bequest'] - b['bequest'])} 더)")
     if alts:
         lines.append("참고로 " + ", ".join(alts) + "가 유리합니다.")
@@ -688,6 +776,48 @@ def whatif_html(d) -> str:
     return f'<div class="wilist">{"".join(rows)}</div>'
 
 
+def render_scenarios(user, R):
+    """시나리오 탭: 현재 결과 저장 + 저장된 시나리오 비교·불러오기·삭제."""
+    items = st.session_state.setdefault("scenarios", [])
+    cur = scn.summarize("현재 결과", st.session_state.get("snap_query", ""), user, R)
+
+    def save(name):
+        lst = st.session_state.setdefault("scenarios", [])
+        name = (name or "").strip() or f"시나리오 {len(lst) + 1}"
+        data = {**cur, "name": name}
+        lst[:] = [x for x in lst if x["name"] != name][-(scn.MAX_SCENARIOS - 1):] + [data]
+
+    def load(idx):
+        load_inputs_from_query(st.session_state["scenarios"][idx]["query"])
+        st.session_state["_autorun"] = True
+
+    def remove(idx):
+        st.session_state["scenarios"].pop(idx)
+
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+    name = c1.text_input("시나리오 이름", placeholder=f"예: 63세 은퇴, 생활비 280만 (비우면 '시나리오 {len(items) + 1}')",
+                         key="scn_name", max_chars=20)
+    c2.button("현재 결과 저장", on_click=save, args=(name,), type="primary", width="stretch", key="scn_save")
+    st.caption(f"최대 {scn.MAX_SCENARIOS}개까지 이 탭(세션) 동안 저장됩니다. 입력을 바꿔 다시 실행한 뒤 저장하면 "
+               "결과를 나란히 비교할 수 있습니다. 오래 보관하려면 시나리오의 링크를 저장하세요.")
+
+    if not items:
+        ui.note("info", "아직 저장된 시나리오가 없습니다. 지금 결과를 저장한 뒤, 입력을 바꿔 다시 실행하고 또 저장해 보세요.")
+        return
+    shown = items + ([cur] if all(x["query"] != cur["query"] for x in items) else [])
+    st.markdown(scn.table_html(shown), unsafe_allow_html=True)
+    st.caption("행마다 가장 좋은 값을 초록색으로 표시합니다. 모두 안정형 1위 전략 기준입니다.")
+
+    for i, it in enumerate(items):
+        # 모바일에서도 이름·버튼이 한 줄에 나란히 오도록(CSS: scnrow 는 열을 접지 않음).
+        with st.container(key=f"scnrow_{i}"):
+            a, b2, c = st.columns([3, 1.2, 1], vertical_alignment="center")
+            a.markdown(f"**{_html.escape(it['name'])}**  \n{_html.escape(it['inputs'])}")
+            b2.button("불러오기", key=f"scn_load_{i}", on_click=load, args=(i,), width="stretch",
+                      help="이 시나리오의 입력으로 되돌리고 다시 계산합니다.")
+            c.button("삭제", key=f"scn_del_{i}", on_click=remove, args=(i,), width="stretch")
+
+
 def margin_text(margin, cfg, user) -> tuple[str, str, str]:
     """물가 안전 마진 → (카드 값, 카드 보조문구, 리포트 문장)."""
     if margin is None:
@@ -713,15 +843,19 @@ def render_landing(user, cfg):
     ])
     h_normal = pension.normal_start_age(user.husband, cfg)
     w_normal = pension.normal_start_age(user.wife, cfg)
-    ui.note("info", f"정상 수령개시연령 — 남편({pension.type_label(user.husband)}) <b>{h_normal}세</b>, "
-                    f"아내({pension.type_label(user.wife)}) <b>{w_normal}세</b>")
+    if user.is_single:
+        ui.note("info", f"정상 수령개시연령 — 본인({pension.type_label(user.husband)}) <b>{h_normal}세</b>")
+    else:
+        ui.note("info", f"정상 수령개시연령 — 남편({pension.type_label(user.husband)}) <b>{h_normal}세</b>, "
+                        f"아내({pension.type_label(user.wife)}) <b>{w_normal}세</b>")
     ui.note("good", "모든 계산은 <b>이 브라우저 안에서</b> 실행됩니다. 입력한 정보는 서버로 전송되지 않습니다.")
 
 
 def render_basic_note(user, cfg, mode):
     ir, crit, elig = estimate_basic_eligibility(user, cfg)
     applied = user.basic_pension_eligible
-    judge = (f"소득인정액 약 <b>{ir/1e4:,.0f}만원</b> / 부부 선정기준액 {crit/1e4:,.0f}만원 → "
+    judge = (f"소득인정액 약 <b>{ir/1e4:,.0f}만원</b> / {'단독' if user.is_single else '부부'} 선정기준액 "
+             f"{crit/1e4:,.0f}만원 → "
              f"{'대상 가능' if elig else '대상 아님'}")
     if mode == "auto":
         if applied:
@@ -737,13 +871,14 @@ def render_basic_note(user, cfg, mode):
 
 def main():
     ui.inject_css()
-    ui.hero("부부 노후자금 통합 시뮬레이터",
+    restore_inputs_from_url()          # 공유 링크·새로고침: URL 의 입력값을 먼저 위젯에 넣음
+    single_mode = st.session_state.get("hh") == "1인 가구"
+    ui.hero("노후자금 통합 시뮬레이터" if single_mode else "부부 노후자금 통합 시뮬레이터",
             "국민·교직원·공무원연금, 주택연금, 추납, 물가, 기대수명을 통합한 월 단위 현금흐름 시뮬레이션")
 
     pol_data = policy.load()
     P = policy.current(pol_data)
     run_slot = st.sidebar.container()  # 실행 버튼을 입력창 맨 위에 두기 위한 자리
-    restore_inputs_from_url()          # 공유 링크·새로고침: URL 의 입력값을 먼저 위젯에 넣음
     user, cfg, basic_mode = build_inputs(P)
     ui.sync_url(current_query())       # 바뀐 입력을 주소창에 반영
 
@@ -762,10 +897,13 @@ def main():
         if prev is None or repr(prev[:2]) != repr((new_user, new_cfg)):
             st.session_state["_pending"] = True
         st.session_state["snap"] = (new_user, new_cfg, new_mode)
+        st.session_state["snap_query"] = current_query()   # 시나리오 저장·불러오기용 입력값
         st.session_state.pop("exports", None)
         st.session_state["_sidebar"] = "close"   # 모바일: 실행하면 입력창을 닫고 결과를 보여줌
 
     run_args = (user, cfg, basic_mode)
+    if st.session_state.pop("_autorun", False):   # 시나리오 '불러오기' 직후 자동 실행
+        run(*run_args)
 
     def open_inputs():
         st.session_state["_sidebar"] = "open"
@@ -820,6 +958,8 @@ def main():
             ui.note("bad", "시뮬레이션 기간이 없습니다. 기대수명이 은퇴나이(아내는 그 시점 나이)보다 커야 합니다.")
             return
 
+        single = user.is_single
+        viz.SINGLE = single   # 그래프의 '남편/본인' 표기 전환
         df, pareto, tops = R["df"], R["pareto"], R["tops"]
         best_row = tops["stable"].iloc[0]
         best_scenario = R["best_scenario"]
@@ -835,9 +975,12 @@ def main():
         sf_months = float(best_row["shortfall_months"])
         ui.kpi_grid([
             ui.kpi("calendar", "추천 연금 개시",
-                   f"{int(best_row['h_claim'])}세 / {int(best_row['w_claim'])}세", "남편 / 아내", highlight=True),
+                   f"{int(best_row['h_claim'])}세" if single
+                   else f"{int(best_row['h_claim'])}세 / {int(best_row['w_claim'])}세",
+                   "본인" if single else "남편 / 아내", highlight=True),
             ui.kpi("home", "주택연금 개시", housing_text(best_row),
-                   "부부 중 남편 나이 기준" if best_row["use_housing"] else "주택연금 미사용"),
+                   ("본인 나이 기준" if single else "부부 중 남편 나이 기준")
+                   if best_row["use_housing"] else "주택연금 미사용"),
             ui.kpi("coins", "평생 총수령(현재가치)", fmt_eok(best_row["total_pv"]), "할인율 반영"),
             ui.kpi("check" if sf_months == 0 else "alert", "생활비 부족",
                    "없음" if sf_months == 0 else f"{sf_months:.0f}개월",
@@ -854,7 +997,7 @@ def main():
 
         # 3) 탭 ---------------------------------------------------------------------
         # 탭 이름은 모바일 한 화면에 최대한 들어가도록 짧게.
-        tabs = st.tabs(["추천", "만약에", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
+        tabs = st.tabs(["추천", "만약에", "시나리오", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
         report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
 
         with tabs[0]:
@@ -863,13 +1006,13 @@ def main():
             v1, v2, v3 = st.tabs(["안정형", "총수령액 극대화형", "상속중시형"])
             with v1:
                 ui.section("shield", "안정형", "생활비 부족 최소화 + 물가에 견고")
-                render_view(tops["stable"], "stable", df)
+                render_view(tops["stable"], "stable", df, user.is_single)
             with v2:
                 ui.section("trend", "총수령액 극대화형", "평생 받는 총액(현재가치) 최대화")
-                render_view(tops["maximize"], "maximize", df)
+                render_view(tops["maximize"], "maximize", df, user.is_single)
             with v3:
                 ui.section("gift", "상속중시형", "사망 시 남기는 잔여자산 최대화")
-                render_view(tops["bequest"], "bequest", df)
+                render_view(tops["bequest"], "bequest", df, user.is_single)
 
         with tabs[1]:
             ui.section("scale", "무엇을 바꾸면 좋아지나",
@@ -880,11 +1023,35 @@ def main():
                        "실제 적용 전에는 입력을 바꿔 다시 실행해 보세요.")
 
         with tabs[2]:
+            ui.section("scale", "시나리오 비교", "조건을 바꿔 가며 저장한 결과를 나란히 비교")
+            render_scenarios(user, R)
+
+        with tabs[3]:
             ui.section("coins", "추천 전략 월수입 구성", "세전 연금 → 세금·건보 차감 → 기초·주택연금 가산 (명목 금액)")
             bd = income_breakdown(best_scenario.frame)
             if bd:
                 st.markdown(breakdown_html(bd), unsafe_allow_html=True)
             guide("breakdown")
+
+            ui.section("shield", "건강보험", "피부양자 자격(소득 연 2,000만원·재산 요건)과 지역가입자 보험료")
+            bm = best_scenario.metrics
+            lost = bm.get("dep_lost_age")
+            who_h = "" if single else "남편 "
+            if not user.health_dependent_possible:
+                status, sub, tone = "지역가입자", "피부양자로 올릴 직장가입 가족 없음", "warn"
+            elif lost is None:
+                status, sub, tone = "피부양자 유지", "기대수명까지 건보료 없음", "good"
+            else:
+                status, sub, tone = f"{who_h}{lost:.0f}세부터 지역가입자", "소득 또는 재산 요건 초과", "warn"
+            ui.kpi_grid([
+                ui.kpi("shield", "건강보험 자격", status, sub, tone=tone),
+                ui.kpi("coins", "자격 상실 시 월 건보료",
+                       "-" if lost is None else f"{bm['dep_lost_premium']/1e4:,.1f}만원", "장기요양보험료 포함"),
+                ui.kpi("chart", "평생 건보료 합계", fmt_eok(bm.get("health_total", 0.0)), "기대수명까지(명목)"),
+            ])
+            st.caption("피부양자 요건: 1인당 연소득 2,000만원 이하(공적연금 전액·기타소득 포함, 개인·퇴직연금 제외), "
+                       "재산세 과세표준 5.4억 이하(9억 이하는 연소득 1,000만원 이하일 때). 부부 중 한 명이라도 넘으면 둘 다 탈락. "
+                       "지역 보험료의 재산분·연금 반영률은 근사이므로 정확한 금액은 건강보험공단 모의계산으로 확인하세요.")
 
             ui.section("thermo", "물가 안전 마진", "물가가 얼마까지 올라도 부족이 없는지")
             worst = best_row.get("worst_infl_shortfall", float("nan"))
@@ -907,30 +1074,35 @@ def main():
             fig_mc = viz.fig_montecarlo_fan(MC)
             chart(fig_mc, "montecarlo")
 
-        with tabs[3]:
+        with tabs[4]:
             ui.section("chart", "현금흐름과 자산", "추천 전략(안정형 1위)의 나이별 흐름")
             # 사망 시점(남편 나이축)을 계산해 현금흐름 그래프에 표시.
             wife_start = user.retirement_age - (user.wife.birth_year - user.husband.birth_year)
             h_death_age = float(best_row["h_life"])
             w_death_age = user.retirement_age + (float(best_row["w_life"]) - wife_start)
-            deaths = sorted([("남편 사망", h_death_age), ("아내 사망", w_death_age)], key=lambda t: t[1])
+            deaths = ([("사망(기대수명)", h_death_age)] if single else
+                      sorted([("남편 사망", h_death_age), ("아내 사망", w_death_age)], key=lambda t: t[1]))
             fig_cf = viz.fig_monthly_cashflow(best_scenario, deaths=deaths)
             fig_as = viz.fig_cumulative_assets(best_scenario)
             g1, g2 = st.columns(2)
             chart(fig_cf, "cashflow", g1)
             chart(fig_as, "assets", g2)
 
-        with tabs[4]:
-            ui.section("calendar", "나이별 누적 수령액과 원금확보 시점", "언제부터 받으면 몇 세에 낸 보험료를 회수하는지")
-            h_lbl = f"남편·{pension.type_label(user.husband)}"
-            w_lbl = f"아내·{pension.type_label(user.wife)}"
-            fig_h = viz.fig_cumulative_receipts(*R["husband_curves"], h_lbl)
-            fig_w = viz.fig_cumulative_receipts(*R["wife_curves"], w_lbl)
-            g3, g4 = st.columns(2)
-            chart(fig_h, "receipts", g3)
-            chart(fig_w, "receipts", g4)
-
         with tabs[5]:
+            ui.section("calendar", "나이별 누적 수령액과 원금확보 시점", "언제부터 받으면 몇 세에 낸 보험료를 회수하는지")
+            h_lbl = f"{'본인' if single else '남편'}·{pension.type_label(user.husband)}"
+            fig_h = viz.fig_cumulative_receipts(*R["husband_curves"], h_lbl)
+            if single:
+                chart(fig_h, "receipts")
+                fig_w = w_lbl = None
+            else:
+                w_lbl = f"아내·{pension.type_label(user.wife)}"
+                fig_w = viz.fig_cumulative_receipts(*R["wife_curves"], w_lbl)
+                g3, g4 = st.columns(2)
+                chart(fig_h, "receipts", g3)
+                chart(fig_w, "receipts", g4)
+
+        with tabs[6]:
             ui.section("scale", "전략 비교·민감도", "주택연금 개시나이, 물가, 기대수명에 따라 결과가 어떻게 달라지는지")
             fig_hz = viz.fig_heatmap(df, "shortfall_total")
             g5, g6 = st.columns(2)
@@ -959,30 +1131,34 @@ def main():
                 chart(fig_sc, "scatter")
 
         report_figs += [("① 연령별 월 현금흐름", fig_cf), ("② 연령별 누적자산", fig_as),
-                        (f"③ 누적 수령액·원금확보 ({h_lbl})", fig_h),
-                        (f"③ 누적 수령액·원금확보 ({w_lbl})", fig_w)]
+                        (f"③ 누적 수령액·원금확보 ({h_lbl})", fig_h)]
+        if fig_w is not None:
+            report_figs.append((f"③ 누적 수령액·원금확보 ({w_lbl})", fig_w))
         if fig_ho is not None:
             report_figs.append(("④ 주택연금 개시별 부족액", fig_ho))
         report_figs += [("⑤ 국민×주택 히트맵", fig_hz), ("⑥ 물가상승률별 부족액", fig_in),
                         ("⑦ 기대수명별 전략", fig_li), ("⑧ Pareto Frontier", fig_pa),
                         ("⑨ 조합별 점수 산점도", fig_sc), ("⑩ 투자 변동성 스트레스(몬테카를로)", fig_mc)]
 
-        with tabs[6]:
+        with tabs[7]:
             ui.section("download", "내보내기", "리포트·표를 파일로 저장 (파일도 브라우저 안에서 생성됩니다)")
             summary = {
                 "n_combos": R["n"],
-                "normal_ages": (f"정상개시 남편({pension.type_label(user.husband)}) "
+                "single": single,
+                "normal_ages": (f"정상개시 본인({pension.type_label(user.husband)}) "
+                                f"{pension.normal_start_age(user.husband, cfg)}세" if single else
+                                f"정상개시 남편({pension.type_label(user.husband)}) "
                                 f"{pension.normal_start_age(user.husband, cfg)}세 / "
                                 f"아내({pension.type_label(user.wife)}) "
                                 f"{pension.normal_start_age(user.wife, cfg)}세"),
                 "margin": m_report,
                 "inputs": [
-                    ("남편", f"{pension.type_label(user.husband)} · {user.husband.birth_year}년생 · "
+                    ("본인" if single else "남편", f"{pension.type_label(user.husband)} · {user.husband.birth_year}년생 · "
                              f"월 {user.husband.nps_monthly:,.0f}원 · 납입원금 {user.husband.paid_principal:,.0f}원 · "
                              f"기대수명 {user.husband_life_expectancy}세"),
-                    ("아내", f"{pension.type_label(user.wife)} · {user.wife.birth_year}년생 · "
+                    *([] if single else [("아내", f"{pension.type_label(user.wife)} · {user.wife.birth_year}년생 · "
                              f"월 {user.wife.nps_monthly:,.0f}원 · 납입원금 {user.wife.paid_principal:,.0f}원 · "
-                             f"기대수명 {user.wife_life_expectancy}세"),
+                             f"기대수명 {user.wife_life_expectancy}세")]),
                     ("은퇴나이 / 월 생활비", f"{user.retirement_age}세 / {user.living_expense_monthly:,.0f}원"),
                     ("금융자산 / 투자수익률", f"{user.financial_assets:,.0f}원 / {user.investment_return*100:.1f}%"),
                     ("물가상승률", f"{user.inflation_rate*100:.1f}%"),

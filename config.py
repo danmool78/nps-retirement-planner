@@ -265,7 +265,29 @@ class TaxPolicy:
     - 기초연금은 비과세(제외).
     """
     pension_tax_rate: float = 0.04        # 연금소득 실효세율(근사)
-    health_insurance_rate: float = 0.04   # 연금소득 대비 건강보험료율(지역가입 근사)
+    health_insurance_rate: float = 0.04   # (health_mode="flat" 일 때만) 연금소득 대비 건보료율
+
+    # --- 개인·퇴직연금 과세: 연 1,500만원 이하 분리과세(나이별 3.3~5.5%), 초과 시 16.5% 분리과세 선택 가정 ---
+    private_separate_limit: float = 15_000_000
+    private_tax_under70: float = 0.055
+    private_tax_70s: float = 0.044
+    private_tax_80plus: float = 0.033
+    private_tax_over_limit: float = 0.165
+
+    # --- 건강보험: 피부양자 판정 → 탈락 시 지역가입자 보험료(health_mode="auto", 기본) ---
+    # 최신값은 policy.json 에서 시행일별로 자동 선택된다. 아래는 2026년 기준 대체값.
+    health_mode: str = "auto"
+    health_rate: float = 0.0719                 # 건강보험료율(2026)
+    ltc_ratio: float = 0.1314                   # 장기요양보험료(건보료 대비, 2026: 0.9448%/7.19%)
+    dependent_income_limit: float = 20_000_000  # 피부양자 소득요건(연, 1인당)
+    dependent_property_limit: float = 540_000_000   # 재산세 과세표준 이 이하면 재산요건 충족
+    dependent_property_limit_high: float = 900_000_000  # 이 이하는 연소득 1,000만 이하일 때만 충족
+    dependent_income_limit_mid: float = 10_000_000
+    local_pension_ratio: float = 0.5            # 지역가입자 소득 산정 시 공적연금 반영률
+    property_deduction: float = 100_000_000     # 재산 보험료 기본공제(과세표준)
+    property_premium_per_100m: float = 45_000   # 공제 후 과세표준 1억당 월 재산보험료(점수표 근사)
+    house_tax_base_ratio: float = 0.31          # 주택 시가 → 재산세 과세표준(공시가 69% × 1주택 45%)
+    other_tax_base_ratio: float = 0.41          # 기타 부동산 시가 → 과세표준(공시가 69% × 60%)
 
 
 @dataclass
@@ -279,6 +301,7 @@ class BasicPensionPolicy:
     # --- 대상 자동판정(소득인정액)용 파라미터 ---
     # 소득인정액 = 공적연금소득 + 재산의 소득환산액. 이 값이 선정기준액 이하면 수급 대상.
     selection_criteria_couple: float = 3_952_000   # 부부 선정기준액(월 소득인정액, 2026.1~)
+    selection_criteria_single: float = 2_470_000   # 단독 선정기준액(1인 가구, 2026.1~)
     property_basic_deduction: float = 135_000_000  # 기본재산공제(대도시 기준)
     financial_deduction: float = 20_000_000        # 금융재산 공제
     property_conversion_rate: float = 0.04         # 재산의 소득환산율(연)
@@ -347,6 +370,21 @@ class UserInput:
     # 기타소득이 유지되는 남편 나이(근로소득처럼 끝나면 낮게, 임대·연금이면 높게/평생).
     other_income_end_age: int = 100
 
+    # 나이별 생활비 변화(은퇴 생활비는 보통 활동기 → 완만기 → 후기로 줄다가 의료·간병비가 는다).
+    # 나이는 생존한 사람 기준(남편 생존 시 남편 나이). 1.0/1.0/0 이면 평생 같은 생활비(물가만 반영).
+    expense_ratio_75: float = 1.0      # 75세부터 생활비 비율
+    expense_ratio_85: float = 1.0      # 85세부터 생활비 비율
+    late_care_monthly: float = 0.0     # 85세부터 더해지는 의료·간병비(현재가치, 월)
+
+    # 개인·퇴직연금(IRP·연금저축·DC형 퇴직연금) — 가구 합산 적립금을 수령기간 동안 균등 수령.
+    # 수령 전까지는 투자수익률로 불어나고, 사망 시 남은 적립금은 상속에 포함된다.
+    private_pension_balance: float = 0.0      # 은퇴 시점 적립금(원)
+    private_pension_start_age: int = 60       # 수령 시작 나이(남편 나이축, 최소 55세)
+    private_pension_years: int = 20           # 수령 기간(년). 10년 이상이어야 연금수령한도 내 저율과세에 유리
+
+    # 건강보험 피부양자로 올릴 직장가입자 가족(자녀 등)이 있는지. 없으면 처음부터 지역가입자.
+    health_dependent_possible: bool = True
+
     # 기타 재산(주택·금융자산 외: 다른 부동산·자동차·전월세보증금 등, 원).
     # 기초연금 소득인정액(재산환산)과 사망시 상속(잔여자산)에 반영된다.
     other_property: float = 0.0
@@ -372,6 +410,15 @@ class UserInput:
 
     # 시뮬레이션 시작 나이(남편 기준 은퇴 나이).
     retirement_age: int = 60
+
+    # 가구 형태: "couple"(부부) / "single"(1인 가구).
+    # 1인 가구는 wife 를 '시작 시점에 이미 없는 배우자'(연금 0, 기대수명=시작나이)로 두어
+    # 계산 엔진을 그대로 쓰고, 탐색·라벨만 1인에 맞게 바꾼다(app.py·optimizer.py 참고).
+    household: str = "couple"
+
+    @property
+    def is_single(self) -> bool:
+        return self.household == "single"
 
 
 @dataclass

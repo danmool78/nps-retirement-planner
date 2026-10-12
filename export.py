@@ -90,14 +90,14 @@ th{background:#EBF5FB;}
 """
 
 
-def _tops_table_html(top: pd.DataFrame, view: str) -> str:
+def _tops_table_html(top: pd.DataFrame, view: str, single: bool = False) -> str:
     """한 관점의 상위 5개 표를 HTML 표로 변환."""
-    rows = ["<tr><th>순위</th><th>국민연금 나이(남/여)</th><th>주택연금</th>"
+    rows = [f"<tr><th>순위</th><th>{'연금 개시나이' if single else '국민연금 나이(남/여)'}</th><th>주택연금</th>"
             "<th>총수령(현가)</th><th>부족개월</th><th>상속</th><th>점수</th></tr>"]
     for i, (_, r) in enumerate(top.iterrows(), 1):
         housing = f"{int(r['housing'])}세" if r.get("use_housing") else "미사용"
         rows.append(
-            f"<tr><td>{i}</td><td>{int(r['h_claim'])}/{int(r['w_claim'])}세</td>"
+            f"<tr><td>{i}</td><td>{int(r['h_claim']) if single else str(int(r['h_claim'])) + '/' + str(int(r['w_claim']))}세</td>"
             f"<td>{housing}</td><td>{r['total_pv']/1e8:.2f}억</td>"
             f"<td>{r['shortfall_months']:.0f}개월</td><td>{r['bequest']/1e8:.2f}억</td>"
             f"<td>{r[f'score_{view}']:.3f}</td></tr>"
@@ -135,7 +135,7 @@ def build_html_report(figs, tops: dict, summary: dict) -> bytes:
     parts.append("<h2>성향별 추천 전략 (상위 5)</h2>")
     for view, ko in view_ko.items():
         if view in tops:
-            parts.append(f"<h3>{ko}</h3>{_tops_table_html(tops[view], view)}")
+            parts.append(f"<h3>{ko}</h3>{_tops_table_html(tops[view], view, summary.get('single', False))}")
 
     # 그래프 — A4 폭 절반(약 91mm)씩 2단 그리드로 촘촘히 배치.
     parts.append("<h2>그래프</h2><div class='charts'>")
