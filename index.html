@@ -6,6 +6,10 @@
     <title>부부 노후자금 시뮬레이터</title>
     <meta name="description" content="국민연금·주택연금·기초연금을 통합한 부부 노후자금 시뮬레이터. 모든 계산은 브라우저 안에서 실행됩니다." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Crect width='44' height='44' rx='12' fill='%231D4ED8'/%3E%3Cpath d='M10 29.5 17 22.5l5 5 11-12' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M26.5 15.5H33V22' fill='none' stroke='%2393C5FD' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <!-- 계산 엔진·패키지를 받아올 곳에 미리 연결해 첫 로딩을 단축 -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="preconnect" href="https://pypi.org" crossorigin />
+    <link rel="preconnect" href="https://files.pythonhosted.org" crossorigin />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.2/build/stlite.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
     <style>
@@ -65,7 +69,8 @@
 
       mount(
         {
-          requirements: ["plotly", "openpyxl"],
+          // 버전 고정: 검증한 버전으로만 동작(새 버전 출시로 갑자기 깨지는 것 방지, 의존성 해석도 빨라짐).
+          requirements: ["plotly==7.1.0", "openpyxl==3.1.5"],
           entrypoint: "app.py",
           files,
           streamlitConfig: {
