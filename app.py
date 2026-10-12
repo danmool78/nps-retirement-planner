@@ -919,12 +919,17 @@ def main():
     # (브라우저/stlite 에서는 계산 중 Python 이 멈춰 화면 갱신이 안 되므로 두 단계로 나눠야 로딩이 보인다.)
     body = st.empty()
     if st.session_state.pop("_pending", False):
-        # 1단계: 로딩 화면만 그리고 바로 다시 실행. 2단계에서 실제 계산(computing=True).
+        # 1단계: 로딩 화면만 그리고 실행을 '정상 종료'(st.stop)한다.
+        # 브라우저(stlite)는 실행이 끝나야 화면 변경이 전송된다. st.rerun() 으로 곧바로 다음 실행(계산)에
+        # 들어가면 계산이 끝날 때까지 로딩 화면이 전송되지 않으므로, 화면을 먼저 보낸 뒤
+        # 페이지 스크립트가 숨은 '계산 시작' 버튼을 눌러 2단계(실제 계산)를 시작한다.
         ui.loading(target=body)
-        if st.session_state.get("_sidebar"):   # 모바일: 로딩이 보이도록 입력창을 바로 닫기 시도(2단계에서 한 번 더)
+        if st.session_state.get("_sidebar"):   # 모바일: 로딩이 보이도록 입력창을 바로 닫기(2단계에서 한 번 더)
             ui.sidebar_action(st.session_state["_sidebar"])
         st.session_state["_computing"] = True
-        st.rerun()
+        st.button("계산이 시작되지 않으면 눌러 주세요", key="go_compute", type="primary")
+        ui.auto_click("go_compute")
+        st.stop()
     computing = st.session_state.pop("_computing", False)
     # 입력창 열기/닫기 스크립트는 1단계(곧바로 중단되는 실행)가 아닌 이번 실행에서 처리해야 확실히 동작한다.
     if st.session_state.get("_sidebar"):
