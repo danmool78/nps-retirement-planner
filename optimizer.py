@@ -181,6 +181,62 @@ def inflation_safety_margin(user: UserInput, cfg: Config, strat: Strategy) -> Op
     return last_safe
 
 
+def what_if(user: UserInput, cfg: Config, strat: Strategy) -> pd.DataFrame:
+    """
+    '무엇을 바꾸면 좋아지나': 추천 전략은 그대로 두고 조건을 하나씩 바꿨을 때 결과 변화.
+
+    반환 열: label(변경 내용), group(분류), shortfall_total, shortfall_months, bequest, total_pv
+    첫 행은 '현재 그대로'(기준). 각 경우는 시뮬레이션 1회라 계산이 가볍다.
+    """
+    import housing_pension as hp
+    from dataclasses import replace
+
+    def run(u: UserInput, s: Strategy):
+        # 은퇴(시작) 나이보다 이른 개시나이는 시작 시점으로 당긴다(시작 전 수령분 누락 방지).
+        h_start = u.retirement_age
+        w_start = u.retirement_age - (u.wife.birth_year - u.husband.birth_year)
+        s = replace(s, husband_claim_age=max(s.husband_claim_age, h_start),
+                    wife_claim_age=max(s.wife_claim_age, w_start),
+                    housing_start_age=max(s.housing_start_age, h_start) if s.use_housing else s.housing_start_age)
+        return simulate(u, s, cfg, record=False).metrics
+
+    def with_house(scale: float) -> UserInput:
+        """집값을 scale 배로. 주택연금 기준월지급액도 같은 비율(가입 상한 반영)로 조정."""
+        new_val = user.house_value * scale
+        old_est = hp.estimate_base_monthly(user.house_value, cfg.housing)
+        new_est = hp.estimate_base_monthly(new_val, cfg.housing)
+        base = user.housing_monthly_base * (new_est / old_est) if old_est > 0 else user.housing_monthly_base
+        return replace(user, house_value=new_val, housing_monthly_base=base)
+
+    living = user.living_expense_monthly
+    cases = [
+        ("현재 그대로", "기준", user, strat),
+        ("월 생활비 30만원 줄이기", "생활비", replace(user, living_expense_monthly=max(0.0, living - 300_000)), strat),
+        ("월 생활비 30만원 늘리기", "생활비", replace(user, living_expense_monthly=living + 300_000), strat),
+        ("은퇴 1년 늦추기", "은퇴", replace(user, retirement_age=user.retirement_age + 1), strat),
+        ("은퇴 2년 늦추기", "은퇴", replace(user, retirement_age=user.retirement_age + 2), strat),
+        ("금융자산 1억 더 모으기", "자산", replace(user, financial_assets=user.financial_assets + 100_000_000), strat),
+        ("투자수익률 1%p 높이기", "투자", replace(user, investment_return=user.investment_return + 0.01), strat),
+        ("투자수익률 1%p 낮아지면", "투자", replace(user, investment_return=max(0.0, user.investment_return - 0.01)), strat),
+        ("물가가 1%p 더 오르면", "물가", user, replace(strat, inflation_rate=strat.inflation_rate + 0.01)),
+        ("둘 다 5년 더 오래 살면", "수명", user,
+         replace(strat, husband_life=strat.husband_life + 5, wife_life=strat.wife_life + 5)),
+    ]
+    if user.house_value > 0 and strat.use_housing:
+        cases.append(("집값이 20% 내리면", "주택", with_house(0.8), strat))
+    if user.other_income_monthly <= 0:
+        cases.append(("은퇴 후 월 50만원 일하기(65세까지)", "소득",
+                      replace(user, other_income_monthly=500_000, other_income_end_age=65), strat))
+
+    rows = []
+    for label, group, u, s_ in cases:
+        m = run(u, s_)
+        rows.append({"label": label, "group": group,
+                     "shortfall_total": m["shortfall_total"], "shortfall_months": m["shortfall_months"],
+                     "bequest": m["bequest"], "total_pv": m["total_pv"]})
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------------------
 # 3. 정규화 및 점수화
 # ---------------------------------------------------------------------------
