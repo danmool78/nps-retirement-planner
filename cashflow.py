@@ -156,6 +156,17 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
 
     # 세금·건보 실효율(공적연금 실수령 계수)과 기초연금 정책.
     tx = cfg.tax
+
+    # 개인·퇴직연금: 수령 시작까지 투자수익률로 불리고, 수령기간 동안 원리금 균등 수령.
+    pp_bal = user.private_pension_balance
+    pp_r = monthly_rate(user.investment_return)
+    pp_start_m = max(0, int(round((user.private_pension_start_age - start_age_h) * 12)))
+    pp_n = max(1, user.private_pension_years * 12)
+    pp_pmt = 0.0
+    if pp_bal > 0:
+        bal_at_start = pp_bal * (1.0 + pp_r) ** pp_start_m
+        pp_pmt = bal_at_start * pp_r / (1.0 - (1.0 + pp_r) ** (-pp_n)) if pp_r > 0 else bal_at_start / pp_n
+    pp_annual = pp_pmt * 12
     flat_health = tx.health_mode == "flat"
     tax_rate = tx.pension_tax_rate + (tx.health_insurance_rate if flat_health else 0.0)
     # 재산세 과세표준(근사, 시작 시점). 이후 주택가격 상승률로 키운다.
@@ -308,8 +319,22 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
             net_taxable -= health
             health_total += health
 
-        # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금 + 기타소득).
-        income = net_taxable + basic_pension + house_income + other_income
+        # --- 3-f) 개인·퇴직연금(부부 공동 자산: 마지막 생존자까지). 건보 산정에서는 제외 ---
+        private_pension = 0.0
+        if pp_bal > 0:
+            pp_bal *= (1.0 + pp_r)
+            if (h_alive or w_alive) and pp_start_m <= m < pp_start_m + pp_n:
+                if pp_annual <= tx.private_separate_limit:
+                    pr = (tx.private_tax_under70 if h_age < 70 else
+                          tx.private_tax_70s if h_age < 80 else tx.private_tax_80plus)
+                else:
+                    pr = tx.private_tax_over_limit
+                pay = min(pp_pmt, pp_bal)
+                pp_bal -= pay
+                private_pension = pay * (1.0 - pr)
+
+        # 실제 손에 쥐는 총수입(실수령 연금 + 기초연금 + 주택연금 + 기타소득 + 개인·퇴직연금).
+        income = net_taxable + basic_pension + house_income + other_income + private_pension
 
         # --- 4) 생활비(물가상승 반영) ---
         both_alive = h_alive and w_alive
@@ -352,7 +377,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
                 "h_pension": h_pension, "w_pension": w_pension,
                 "survivor_pension": survivor_extra, "basic_pension": basic_pension,
                 "net_taxable": net_taxable, "house_income": house_income, "health": health,
-                "other_income": other_income,
+                "other_income": other_income, "private_pension": private_pension,
                 "income": income, "expense": expense, "net": net,
                 "assets": assets, "shortfall": shortfall, "both_alive": both_alive,
             })
@@ -371,7 +396,7 @@ def simulate(user: UserInput, strat: Strategy, cfg: Config, record: bool = True,
         "shortfall_months": shortfall_months,
         "worst_shortfall": worst_shortfall,
         "depletion_age": depletion_age,
-        "bequest": assets + house_bequest + other_bequest,
+        "bequest": assets + house_bequest + other_bequest + max(0.0, pp_bal),   # 남은 개인연금 적립금도 상속
         "survivor_min_net": survivor_min_net,
         "final_assets": assets,
         "house_bequest": house_bequest,

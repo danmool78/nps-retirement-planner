@@ -123,6 +123,7 @@ GRAPH_GUIDES = {
 - **실수령 연금** = 세전에서 세금·건보를 뺀 실제 받는 연금.
 - **+ 기초연금** = 65세부터 추가(부부 동시 수급 시 각 감액).
 - **+ 주택연금** = 주택연금 월지급액(비과세).
+- **+ 개인·퇴직연금(세후)** = IRP·연금저축 등을 수령기간 동안 나눠 받은 금액에서 연금소득세를 뺀 것.
 - **= 월 실수령 합계** = 그 나이에 매달 실제 들어오는 총액. 생활비와 비교하면 됩니다.
 """,
     "montecarlo": """
@@ -254,6 +255,9 @@ PERSIST = {
     "hm": ("hm", "int", 120, 0, 1_000),
     "tx": ("tx", "float", 4.0, 0.0, 30.0),
     "dep": ("dep", "bool", True, None, None),
+    "ppb": ("ppb", "float", 0.0, 0.0, 100.0),
+    "pps": ("pps", "int", 60, 55, 90),
+    "ppy": ("ppy", "int", 20, 5, 40),
     "dr": ("dr", "float", 2.0, 0.0, 10.0),
 }
 _SPEC_BY_KEY = {spec[0]: spec for spec in PERSIST.values()}
@@ -422,6 +426,19 @@ def build_inputs(P: dict):
             "홀로 생존 시 생활비 비율", 0.4, 1.0, step=0.05, key="sr",
             help="1인 가구 생활비 / 부부 생활비", **dv("sr"))
 
+    with sb.expander("개인·퇴직연금 (IRP·연금저축)"):
+        pp_bal = st.number_input("적립금 합계(억원)", 0.0, 100.0, step=0.1, key="ppb",
+                                 help="은퇴 시점 IRP·연금저축·DC형 퇴직연금 적립금 합계(부부 합산). 0이면 반영 안 함",
+                                 **dv("ppb")) * 100_000_000
+        p1, p2 = st.columns(2)
+        pp_start = p1.number_input("수령 시작 나이", 55, 90, key="pps", **dv("pps"),
+                                   help="남편 나이 기준" if not single else None)
+        pp_years = p2.number_input("수령 기간(년)", 5, 40, key="ppy", **dv("ppy"),
+                                   help="10년 이상 나눠 받아야 연금수령한도 안에서 저율과세에 유리")
+        if pp_bal > 0:
+            st.caption("수령 전까지 투자수익률로 불어나고 기간 동안 균등 수령. 연 1,500만원 이하면 3.3~5.5%, "
+                       "초과하면 16.5% 분리과세로 계산합니다. 건보료 산정에서는 제외됩니다.")
+
     with sb.expander("기초연금 처리" if single else "유족연금·기초연금 처리"):
         survivor_mode = "auto" if single else SURV_MODES[st.selectbox(
             "배우자 사망 시 유족연금", list(SURV_MODES), key="sm",
@@ -528,6 +545,7 @@ def build_inputs(P: dict):
         house_value=house_val, housing_monthly_base=house_monthly,
         use_housing_pension=use_house, retirement_age=retire_age, household=household,
         health_dependent_possible=dep_possible,
+        private_pension_balance=pp_bal, private_pension_start_age=pp_start, private_pension_years=pp_years,
     )
 
     cfg = Config(
@@ -573,7 +591,10 @@ def estimate_basic_eligibility(user, cfg):
     """
     bp = cfg.basic
     # 소득평가액(월): 공적연금 + 연금 외 기타소득(근로·임대·이자 등).
-    pension_income = user.husband.nps_monthly + user.wife.nps_monthly + user.other_income_monthly
+    # 개인·퇴직연금은 대략적인 월 수령액(적립금 ÷ 수령개월)으로 반영.
+    private_monthly = user.private_pension_balance / max(1, user.private_pension_years * 12)
+    pension_income = (user.husband.nps_monthly + user.wife.nps_monthly + user.other_income_monthly
+                      + private_monthly)
     general = max(0.0, user.house_value + user.other_property - bp.property_basic_deduction)
     financial = max(0.0, user.financial_assets - bp.financial_deduction)
     property_income = (general + financial) * bp.property_conversion_rate / 12.0
@@ -583,7 +604,7 @@ def estimate_basic_eligibility(user, cfg):
 
 
 BREAKDOWN_ROWS = ["공적연금(세전)", "− 세금·건보", "실수령 연금",
-                  "+ 기초연금", "+ 주택연금", "+ 기타소득", "= 월 실수령 합계"]
+                  "+ 기초연금", "+ 주택연금", "+ 기타소득", "+ 개인·퇴직연금(세후)", "= 월 실수령 합계"]
 
 
 def income_breakdown(frame, ages=(65, 70, 75, 80)):
@@ -602,7 +623,8 @@ def income_breakdown(frame, ages=(65, 70, 75, 80)):
         gross = row["h_pension"] + row["w_pension"] + row["survivor_pension"]  # 세전 공적연금
         tax = gross - row["net_taxable"]                                       # 세금·건보 차감액
         cols[f"{age}세"] = [gross, -tax, row["net_taxable"], row["basic_pension"],
-                           row["house_income"], row.get("other_income", 0.0), row["income"]]
+                           row["house_income"], row.get("other_income", 0.0),
+                           row.get("private_pension", 0.0), row["income"]]
     return cols or None
 
 

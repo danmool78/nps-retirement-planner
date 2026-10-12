@@ -267,6 +267,13 @@ class TaxPolicy:
     pension_tax_rate: float = 0.04        # 연금소득 실효세율(근사)
     health_insurance_rate: float = 0.04   # (health_mode="flat" 일 때만) 연금소득 대비 건보료율
 
+    # --- 개인·퇴직연금 과세: 연 1,500만원 이하 분리과세(나이별 3.3~5.5%), 초과 시 16.5% 분리과세 선택 가정 ---
+    private_separate_limit: float = 15_000_000
+    private_tax_under70: float = 0.055
+    private_tax_70s: float = 0.044
+    private_tax_80plus: float = 0.033
+    private_tax_over_limit: float = 0.165
+
     # --- 건강보험: 피부양자 판정 → 탈락 시 지역가입자 보험료(health_mode="auto", 기본) ---
     # 최신값은 policy.json 에서 시행일별로 자동 선택된다. 아래는 2026년 기준 대체값.
     health_mode: str = "auto"
@@ -362,6 +369,12 @@ class UserInput:
     other_income_monthly: float = 0.0
     # 기타소득이 유지되는 남편 나이(근로소득처럼 끝나면 낮게, 임대·연금이면 높게/평생).
     other_income_end_age: int = 100
+
+    # 개인·퇴직연금(IRP·연금저축·DC형 퇴직연금) — 가구 합산 적립금을 수령기간 동안 균등 수령.
+    # 수령 전까지는 투자수익률로 불어나고, 사망 시 남은 적립금은 상속에 포함된다.
+    private_pension_balance: float = 0.0      # 은퇴 시점 적립금(원)
+    private_pension_start_age: int = 60       # 수령 시작 나이(남편 나이축, 최소 55세)
+    private_pension_years: int = 20           # 수령 기간(년). 10년 이상이어야 연금수령한도 내 저율과세에 유리
 
     # 건강보험 피부양자로 올릴 직장가입자 가족(자녀 등)이 있는지. 없으면 처음부터 지역가입자.
     health_dependent_possible: bool = True
