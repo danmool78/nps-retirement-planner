@@ -62,7 +62,7 @@ GRAPH_GUIDES = {
 **③ 나이별 누적 수령액·원금확보 시점** — 연금을 언제부터 받느냐에 따른 누적 수령액.
 - 색선 = 개시나이별(조기/정상/연기) 누적 수령액. 위로 갈수록 많이 받은 것.
 - **범례에 개시나이별 '월 수령액'**(월에 얼마 받는지)이 함께 표시됩니다.
-- 빨간 점선 = **납입원금**. 색선이 이 선을 넘는 점(●)이 **원금확보(손익분기)**.
+- 빨간 점선 = **납입원금**. 색선이 이 선을 넘는 점(●)이 **원금확보(손익분기)**이며, 그 나이와 이득 기간은 범례에 표시됩니다.
 - 회색 점선 = **기대수명**. 원금확보 지점부터 기대수명까지가 **이득 구간**.
 - 원금확보가 **일찍(중간쯤 이전)** 올수록 이득 기간이 길어 유리.
 - **주의:** 이 그래프는 **순수 국민연금(내가 낸 보험료)의 손익분기**만 봅니다. 내가 보험료를 안 낸
@@ -453,7 +453,8 @@ def breakdown_html(cols) -> str:
     body = []
     for i, name in enumerate(BREAKDOWN_ROWS):
         cls = ' class="total"' if i == len(BREAKDOWN_ROWS) - 1 else ""
-        cells = "".join(f"<td>{vals[i]/1e4:,.0f}만</td>" for vals in cols.values())
+        # round 후 0 이면 '-0만' 대신 '0만'으로 표시.
+        cells = "".join(f"<td>{(round(vals[i]/1e4) or 0):,.0f}만</td>" for vals in cols.values())
         body.append(f"<tr{cls}><th>{name}</th>{cells}</tr>")
     return ('<div class="tbl-wrap"><table class="bd"><thead><tr><th>항목</th>'
             f'{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>')
@@ -499,8 +500,8 @@ def margin_text(margin, cfg, user) -> tuple[str, str, str]:
 # ---------------------------------------------------------------------------
 def render_landing(user, cfg):
     ui.steps([
-        ("couple", "부부 정보 입력", "왼쪽 입력창에서 남편·아내의 연금 종류, 예상 월액, 기대수명을 입력합니다. "
-                                  "모바일에서는 왼쪽 위 화살표로 입력창을 엽니다."),
+        ("couple", "부부 정보 입력", "입력창에서 남편·아내의 연금 종류, 예상 월액, 기대수명을 입력합니다. "
+                                  "모바일에서는 위의 '입력값 입력하기' 버튼으로 입력창을 엽니다."),
         ("wallet", "생활비·자산·주택", "월 생활비, 금융자산, 주택가격과 주택연금 사용 여부를 정합니다."),
         ("target", "시뮬레이션 실행", "수령나이·주택연금 개시나이의 모든 조합을 물가 스트레스까지 포함해 평가하고 "
                                    "성향별 최적 전략을 추천합니다."),
@@ -549,14 +550,23 @@ def main():
     def run():
         st.session_state["snap"] = (user, cfg, basic_mode)
         st.session_state.pop("exports", None)
+        st.session_state["_sidebar"] = "close"   # 모바일: 실행하면 입력창을 닫고 결과를 보여줌
+
+    def open_inputs():
+        st.session_state["_sidebar"] = "open"
 
     run_slot.button("시뮬레이션 실행", type="primary", width="stretch", on_click=run, key="run_side")
+    if st.session_state.get("_sidebar"):
+        ui.sidebar_action(st.session_state.pop("_sidebar"))
 
     snap = st.session_state.get("snap")
     if snap is None:
+        # 모바일에서는 입력창이 접혀 있으므로 본문에서 바로 열 수 있게(넓은 화면에서는 CSS 로 숨김).
+        st.button("입력값 입력하기", on_click=open_inputs, key="open_inputs")
         render_landing(user, cfg)
         st.button("시뮬레이션 실행", type="primary", on_click=run, key="run_main")
         return
+    st.button("입력값 수정하기", on_click=open_inputs, key="open_inputs2")
     if repr(snap[:2]) != repr((user, cfg)):
         ui.note("warn", "입력값이 바뀌었습니다. 아래 결과는 이전 입력 기준입니다.")
         st.button("새 입력으로 다시 계산", type="primary", on_click=run, key="run_again")
@@ -605,7 +615,8 @@ def main():
     render_basic_note(user, cfg, basic_mode)
 
     # 3) 탭 ---------------------------------------------------------------------
-    tabs = st.tabs(["추천 전략", "월수입·안전성", "현금흐름·자산", "연금 수령 시점", "전략 비교", "내보내기"])
+    # 탭 이름은 모바일 한 화면에 최대한 들어가도록 짧게.
+    tabs = st.tabs(["추천", "월수입·안전", "현금흐름", "수령시점", "비교", "내보내기"])
     report_figs = []  # [(제목, fig)] — HTML 리포트에 담을 그래프 모음
 
     with tabs[0]:
