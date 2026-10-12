@@ -76,18 +76,22 @@ def fig_monthly_cashflow(sc: Scenario, deaths=None) -> go.Figure:
     if len(deaths) == 2 and deaths[1][1] > deaths[0][1]:
         fig.add_vrect(x0=deaths[0][1], x1=deaths[1][1],
                       fillcolor="#95A5A6", opacity=0.12, line_width=0,
-                      annotation_text="홀로 생존 구간(생활비↓·유족연금 조정)",
-                      annotation_position="bottom left", annotation_font_size=10,
+                      annotation_text="홀로 생존",
+                      annotation_position="bottom right", annotation_font_size=10,
                       annotation_font_color="#566573")
 
     # 사망 시점 세로선(수입·지출이 급변하는 이유를 명시).
-    # 두 사망 시점이 가까우면 라벨이 겹치므로 첫 번째는 선 왼쪽, 두 번째는 오른쪽에 둔다.
+    # 라벨은 선 왼쪽에 붙여 그래프 오른쪽 끝에서 잘리지 않게 하고,
+    # 두 사망 시점이 가까우면 겹치므로 두 번째 라벨은 한 줄 아래로 내린다.
     for i, (label, age) in enumerate(deaths):
         fig.add_vline(x=age, line_dash="dash", line_color="#7F8C8D",
                       annotation_text=f"{label} {age:.0f}세",
-                      annotation_position="top left" if i == 0 else "top right",
+                      annotation_position="top left", annotation_yshift=-16 * i,
                       annotation_font_size=11, annotation_font_color="#566573")
 
+    # 세로선·음영 주석 때문에 축이 데이터보다 넓어지지 않도록 데이터 범위로 고정.
+    if not df.empty:
+        fig.update_xaxes(range=[float(df["husband_age"].min()), float(df["husband_age"].max())])
     fig.update_layout(title="① 연령별 월 현금흐름", xaxis_title="남편 나이",
                       yaxis_title="월 금액(만원)", hovermode="x unified")
     return _style(fig)
@@ -154,7 +158,7 @@ def fig_cumulative_receipts(curves, principal, breakevens, death, reps, monthlie
     - 범례에 개시나이별 **월수령액**(월 얼마 받는지)을 함께 표시.
     - 가로 빨간 점선 = 납입원금. 곡선이 이 선을 넘는 지점이 '원금확보(손익분기)'.
     - 세로 회색 점선 = 기대수명(그래프 우측 끝). 원금확보~기대수명 구간이 '이득 구간'.
-    - 각 곡선의 원금확보 지점에 마커와 '원금확보 XX세·이득 YY년' 주석을 표시.
+    - 각 곡선의 원금확보 지점에 마커를 찍고, 원금확보 나이·이득 기간은 범례에 표시.
     원금확보가 기대수명보다 충분히 이르게(중간쯤) 올수록 이득 기간이 길다.
     """
     palette = [C_NET, C_INCOME, C_ACCENT, C_ASSET]
@@ -166,27 +170,26 @@ def fig_cumulative_receipts(curves, principal, breakevens, death, reps, monthlie
         color = palette[i % len(palette)]
         # 범례명에 '월 얼마'를 넣어 개시나이별 월수령액을 바로 보이게 함.
         mon = monthlies.get(ca)
-        name = f"{ca}세 개시 · 월 {mon/_MAN:,.0f}만원" if mon else f"{ca}세 개시"
+        be = breakevens.get(ca)
+        # 원금확보 나이·이득 기간은 범례에 넣는다(그래프 위 주석은 좁은 화면에서 서로 겹침).
+        name = f"{ca}세 개시" + (f" · 월 {mon/_MAN:,.0f}만원" if mon else "")
+        if be is not None:
+            name += f" · 원금확보 {be}세(이득 {max(0, death - be)}년)"
+        elif principal > 0:
+            name += " · 기대수명 내 원금 미회수"
         fig.add_trace(go.Scatter(
             x=sub["age"], y=sub["cumulative"] / _MAN,
             mode="lines", name=name, line=dict(color=color, width=2),
         ))
-        # 원금확보 지점 마커 + 주석(이득 기간 = 기대수명 - 원금확보나이).
-        be = breakevens.get(ca)
+        # 원금확보 지점 마커(탭/호버하면 내용 표시).
         if be is not None:
-            profit_years = max(0, death - be)
             fig.add_trace(go.Scatter(
                 x=[be], y=[principal / _MAN], mode="markers",
                 marker=dict(color=color, size=11, symbol="circle",
                             line=dict(width=1.5, color="white")),
                 showlegend=False,
+                hovertemplate=f"{ca}세 개시 → 원금확보 {be}세<extra></extra>",
             ))
-            fig.add_annotation(
-                x=be, y=principal / _MAN,
-                text=f"{ca}세개시→원금확보 {be}세·이득 {profit_years}년",
-                showarrow=True, arrowhead=2, ax=0, ay=-30 - i * 18,
-                font=dict(size=10, color=color),
-            )
 
     # 납입원금 수평선.
     if principal > 0:
@@ -405,6 +408,7 @@ def fig_score_scatter(df: pd.DataFrame, view: str = "stable",
                            bgcolor="rgba(255,255,255,0.95)",
                            bordercolor=C_ACCENT, borderwidth=2, borderpad=4)
 
-    fig.update_layout(title=f"⑨ 조합별 점수 산점도 ({view})",
+    view_ko = {"stable": "안정형", "maximize": "총수령액 극대화형", "bequest": "상속중시형"}.get(view, view)
+    fig.update_layout(title=f"⑨ 조합별 점수 산점도 ({view_ko})",
                       xaxis_title="총수령액 현재가치(만원)", yaxis_title="잔여자산(만원)")
     return _style(fig)

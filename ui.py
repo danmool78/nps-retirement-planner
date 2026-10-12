@@ -10,9 +10,12 @@ ui.py
 
 from __future__ import annotations
 
+import copy
 import html
+import time
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ---------------------------------------------------------------------------
 # SVG 아이콘 (24x24, stroke 기반) — path 조각만 저장하고 svg() 가 감싼다.
@@ -201,16 +204,57 @@ table.pol .sm{color:var(--muted); font-size:.72rem;}
 .stTabs [data-baseweb="tab-list"], .stTabs [role="tablist"]{gap:18px; overflow-x:auto; flex-wrap:nowrap;}
 .stTabs button[role="tab"]{white-space:nowrap; font-weight:500;}
 
+/* 그래프 제목(plotly 제목 대신 HTML 로 그려 좁은 화면에서도 자연스럽게 줄바꿈) */
+.chart-h{font-size:.98rem; font-weight:700; color:var(--ink); margin:.6rem 0 0; line-height:1.4;}
+
+/* 모바일 전용 버튼(입력창 열기)은 넓은 화면에서 숨김 */
+.st-key-open_inputs, .st-key-open_inputs2{display:none;}
+/* 스크립트 실행용 0px 컴포넌트가 여백을 만들지 않도록 */
+.element-container:has(iframe[height="1"]), .stElementContainer:has(iframe[height="1"]){display:none;}
+
 /* 모바일 */
 @media (max-width: 640px){
-  .block-container{padding-left:1rem; padding-right:1rem; padding-top:3rem;}
-  .hero h1{font-size:1.3rem;}
-  .hero svg{width:36px; height:36px;}
+  .block-container{padding-left:.9rem; padding-right:.9rem; padding-top:3.2rem;}
+  .hero{gap:10px; align-items:flex-start;}
+  .hero > svg{width:34px; height:34px; margin-top:2px;}
+  .hero h1{font-size:1.12rem; line-height:1.35; word-break:keep-all;}
+  .hero p{font-size:.8rem;}
+  .sec{margin:1.1rem 0 .5rem; gap:8px;}
+  .sec .bub{width:30px; height:30px; border-radius:9px;}
+  .sec h3{font-size:1.02rem;}
+  .sec p{font-size:.78rem;}
   .kgrid{grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;}
-  .kcard{padding:11px 12px;}
-  .kcard .val{font-size:1.1rem;}
-  .rank{grid-template-columns:1fr; gap:8px;}
-  .sec{margin-top:1.2rem;}
+  .kcard{padding:10px 11px; border-radius:12px;}
+  .kcard .lab{font-size:.74rem; gap:5px;}
+  .kcard .val{font-size:1.08rem; margin-top:4px;}
+  .kcard .sub{font-size:.7rem;}
+  .note{font-size:.82rem; padding:10px 12px;}
+  .rank{grid-template-columns:1fr; gap:6px; padding:12px;}
+  .rank .no{width:28px; height:28px; font-size:.85rem;}
+  .rank .title{font-size:.93rem;}
+  .rank .facts{font-size:.8rem; gap:2px 12px;}
+  .rank li{font-size:.74rem;}
+  .steps{gap:8px;}
+  .step{padding:12px 14px;}
+  .step h4{font-size:.95rem;}
+  .step p{font-size:.8rem;}
+  table.bd{font-size:.8rem;}
+  table.bd th, table.bd td{padding:7px 9px;}
+  .chart-h{font-size:.9rem;}
+  .stTabs [role="tablist"]{gap:14px;}
+  .stTabs button[role="tab"] p{font-size:.88rem;}
+  /* iOS 는 16px 미만 입력칸에 포커스하면 화면을 확대하므로 16px 로 고정 */
+  input, select, textarea, [data-baseweb="select"] div{font-size:16px !important;}
+  .st-key-open_inputs, .st-key-open_inputs2{display:block;}
+  /* 주요 버튼은 손가락으로 누르기 쉽게 꽉 차게 */
+  .st-key-run_main, .st-key-run_again, .st-key-open_inputs, .st-key-open_inputs2,
+  .st-key-run_main .stButton, .st-key-run_again .stButton, .st-key-open_inputs .stButton,
+  .st-key-open_inputs2 .stButton, .st-key-run_main button, .st-key-run_again button,
+  .st-key-open_inputs button, .st-key-open_inputs2 button{width:100% !important;}
+  .st-key-run_main button, .st-key-run_again button, .st-key-open_inputs button,
+  .st-key-open_inputs2 button{min-height:46px;}
+  /* 터치 기기에선 plotly 도구모음이 항상 떠서 그래프를 가리므로 숨김 */
+  .modebar-container{display:none !important;}
 }
 </style>
 """
@@ -281,10 +325,58 @@ def steps(items):
     _html(f'<div class="steps">{cards}</div>')
 
 
-# plotly 차트 공통 옵션(모바일 터치에서 툴바 숨김·반응형).
-PLOTLY_CONFIG = {"displaylogo": False, "responsive": True,
-                 "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]}
+# plotly 차트 공통 옵션. 휠·드래그 확대를 꺼서 모바일에서 손가락으로 화면을 스크롤할 때
+# 그래프가 터치를 가로채지 않게 한다(탭하면 값 표시는 그대로 됨).
+PLOTLY_CONFIG = {"displaylogo": False, "responsive": True, "scrollZoom": False,
+                 "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d",
+                                            "zoom2d", "pan2d", "zoomIn2d", "zoomOut2d"]}
 
 
 def chart(fig, target=st):
-    target.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
+    """그래프 제목은 HTML 로 따로 그리고(줄바꿈 가능), 화면용 사본은 제목 여백을 줄인다.
+    원본 fig 는 리포트(HTML 내보내기)에서 제목째로 쓰이므로 건드리지 않는다."""
+    title = fig.layout.title.text or ""
+    view = copy.deepcopy(fig)
+    view.update_layout(title=None, margin=dict(t=16), dragmode=False)
+    if title:
+        _html(f'<div class="chart-h">{html.escape(title)}</div>', target)
+    target.plotly_chart(view, width="stretch", config=PLOTLY_CONFIG)
+
+
+# ---------------------------------------------------------------------------
+# 사이드바(입력창) 제어 — 모바일에서는 사이드바가 화면 전체를 덮으므로
+# 실행 후 자동으로 닫고, 본문 버튼으로 열 수 있게 한다. (스크립트는 같은 출처 iframe 에서 부모 문서를 조작)
+# ---------------------------------------------------------------------------
+_SIDEBAR_JS = """
+<script>
+(function(){
+  const doc = window.parent.document;
+  const action = "%s";
+  const mobile = window.parent.innerWidth <= 768;
+  const sb = doc.querySelector('[data-testid="stSidebar"]');
+  const expanded = sb && sb.getAttribute("aria-expanded") === "true";
+  const pick = (sel) => { const el = doc.querySelector(sel); return el && (el.tagName === "BUTTON" ? el : el.querySelector("button")); };
+  if (action === "close" && mobile && expanded) {
+    const b = pick('[data-testid="stSidebarCollapseButton"]'); if (b) b.click();
+  }
+  if (action === "open" && !expanded) {
+    const b = pick('[data-testid="stExpandSidebarButton"]') || pick('[data-testid="stSidebarCollapsedControl"]');
+    if (b) b.click();
+  }
+  if (action === "close" && mobile) {
+    const main = doc.querySelector('[data-testid="stMain"]') || doc.querySelector('section.main');
+    if (main) main.scrollTo({top: 0}); window.parent.scrollTo({top: 0});
+  }
+})();
+</script>
+"""
+
+
+def sidebar_action(action: str):
+    """'open' / 'close'(모바일 폭에서만). 매번 다른 내용으로 렌더해 스크립트가 다시 실행되게 한다."""
+    code = _SIDEBAR_JS % action + f"<!-- {time.time()} -->"
+    # 최신 Streamlit 은 st.iframe, 브라우저 실행(stlite) 쪽 구버전은 components.html 을 쓴다.
+    if hasattr(st, "iframe"):
+        st.iframe(code, height=1)
+    else:
+        components.html(code, height=1)
